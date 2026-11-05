@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.2] - 2026-11-05
+
 ### Added
 
 - [Git panel guide](https://github.com/julienbohy/symfony-git-profiler-bundle/blob/main/docs/git-panel.md): what each part of the panel shows (toolbar, summary cards,
@@ -111,6 +113,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - List of commits ahead of the upstream branch, with the files they touch.
 - Graceful degradation when the directory is not a Git repository or `git` is unavailable.
 
-[Unreleased]: https://github.com/julienbohy/symfony-git-profiler-bundle/compare/0.3.1...HEAD
+[Unreleased]: https://github.com/julienbohy/symfony-git-profiler-bundle/compare/0.3.2...HEAD
+[0.3.2]: https://github.com/julienbohy/symfony-git-profiler-bundle/compare/0.3.1...0.3.2
 [0.3.1]: https://github.com/julienbohy/symfony-git-profiler-bundle/compare/0.3.0...0.3.1
 [0.3.0]: https://github.com/julienbohy/symfony-git-profiler-bundle/releases/tag/0.3.0

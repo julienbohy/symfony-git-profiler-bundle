@@ -1,0 +1,56 @@
+name: Tests
+
+on:
+  workflow_call:
+
+permissions:
+  contents: read
+
+jobs:
+  tests:
+    name: PHP ${{ matrix.php }} / Symfony ${{ matrix.symfony }}${{ matrix.dependencies == 'lowest' && ' (lowest)' || '' }}
+    runs-on: ubuntu-latest
+    continue-on-error: ${{ matrix.experimental }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { php: '8.3', symfony: '6.4.*', dependencies: 'lowest', stability: 'stable', experimental: false }
+          - { php: '8.3', symfony: '6.4.*', dependencies: 'highest', stability: 'stable', experimental: false }
+          - { php: '8.3', symfony: '7.4.*', dependencies: 'highest', stability: 'stable', experimental: false }
+          - { php: '8.4', symfony: '8.1.*', dependencies: 'highest', stability: 'stable', experimental: false }
+          # Symfony 8.2 is not released yet: drop stability/experimental once 8.2.0 is tagged.
+          - { php: '8.5', symfony: '8.2.*', dependencies: 'highest', stability: 'beta', experimental: true }
+    env:
+      SYMFONY_REQUIRE: ${{ matrix.symfony }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Trust the workspace for Git
+        run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
+
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: ${{ matrix.php }}
+          coverage: none
+
+      - name: Install Symfony Flex (pins symfony/* via SYMFONY_REQUIRE)
+        run: |
+          composer global config --no-plugins allow-plugins.symfony/flex true
+          composer global require --no-progress --no-scripts --no-plugins symfony/flex
+
+      - name: Validate composer.json
+        run: composer validate --strict --no-check-publish
+
+      - name: Allow pre-release Symfony
+        if: matrix.stability != 'stable'
+        run: composer config minimum-stability ${{ matrix.stability }}
+
+      - name: Install dependencies
+        run: composer update --prefer-dist --no-progress --no-interaction ${{ matrix.dependencies == 'lowest' && '--prefer-lowest' || '' }}
+
+      - name: Show resolved Symfony version
+        run: composer show symfony/http-kernel | grep -E '^versions'
+
+      - name: PHPUnit
+        run: vendor/bin/phpunit

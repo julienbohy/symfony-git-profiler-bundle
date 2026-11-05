@@ -1,0 +1,283 @@
+{% extends '@WebProfiler/Profiler/layout.html.twig' %}
+
+{% block toolbar %}
+    {% if collector.available %}
+        {% set icon %}
+            <svg viewBox="0 0 256 256" xmlns="http://www.w3.org/2000/svg" preserveAspectRatio="xMinYMin meet" fill="#000000"><g id="SVGRepo_bgCarrier" stroke-width="0"></g><g id="SVGRepo_tracerCarrier" stroke-linecap="round" stroke-linejoin="round"></g><g id="SVGRepo_iconCarrier"><path d="M251.172 116.594L139.4 4.828c-6.433-6.437-16.873-6.437-23.314 0l-23.21 23.21 29.443 29.443c6.842-2.312 14.688-.761 20.142 4.693 5.48 5.489 7.02 13.402 4.652 20.266l28.375 28.376c6.865-2.365 14.786-.835 20.269 4.657 7.663 7.66 7.663 20.075 0 27.74-7.665 7.666-20.08 7.666-27.749 0-5.764-5.77-7.188-14.235-4.27-21.336l-26.462-26.462-.003 69.637a19.82 19.82 0 0 1 5.188 3.71c7.663 7.66 7.663 20.076 0 27.747-7.665 7.662-20.086 7.662-27.74 0-7.663-7.671-7.663-20.086 0-27.746a19.654 19.654 0 0 1 6.421-4.281V94.196a19.378 19.378 0 0 1-6.421-4.281c-5.806-5.798-7.202-14.317-4.227-21.446L81.47 39.442l-76.64 76.635c-6.44 6.443-6.44 16.884 0 23.322l111.774 111.768c6.435 6.438 16.873 6.438 23.316 0l111.251-111.249c6.438-6.44 6.438-16.887 0-23.324" fill="#DE4C36"></path></g></svg>
+            <span class="sf-toolbar-value">{{ collector.branch }}</span>
+            <span class="sf-toolbar-value" title="Locally modified files">&#9998; {{ collector.changedFilesCount }}</span>
+            <span class="sf-toolbar-value" title="Unpushed commits">&#8593; {{ collector.hasUpstream ? collector.unpushedCommitsCount : '–' }}</span>
+            {% if collector.hasUpstream and collector.behindCommitsCount > 0 %}
+                <span class="sf-toolbar-value" title="Commits behind {{ collector.upstreamRef }} (since the last fetch)">&#8595; {{ collector.behindCommitsCount }}</span>
+            {% endif %}
+        {% endset %}
+
+        {% set text %}
+            <div class="sf-toolbar-info-piece">
+                <b>Branch</b>
+                <span>{{ collector.branch }}</span>
+            </div>
+            <div class="sf-toolbar-info-piece">
+                <b>Commit</b>
+                <span>{{ collector.shortCommit }}</span>
+            </div>
+            <div class="sf-toolbar-info-piece">
+                <b>Modified files</b>
+                <span>{{ collector.changedFilesCount }}</span>
+            </div>
+            <div class="sf-toolbar-info-piece">
+                <b>Unpushed commits</b>
+                <span>{{ collector.hasUpstream ? collector.unpushedCommitsCount : 'no upstream' }}</span>
+            </div>
+            {% if collector.hasUpstream %}
+                <div class="sf-toolbar-info-piece">
+                    <b>Behind upstream</b>
+                    <span>{{ collector.behindCommitsCount }}</span>
+                </div>
+            {% endif %}
+        {% endset %}
+
+        {{ include('@WebProfiler/Profiler/toolbar_item.html.twig', { link: true }) }}
+    {% endif %}
+{% endblock %}
+
+{% block menu %}
+    <span class="label {{ not collector.available ? 'disabled' }}">
+        <span class="icon">
+<svg viewBox="0 0 256 256" xmlns="http://www.w3.org/2000/svg" preserveAspectRatio="xMinYMin meet" fill="#000000"><g id="SVGRepo_bgCarrier" stroke-width="0"></g><g id="SVGRepo_tracerCarrier" stroke-linecap="round" stroke-linejoin="round"></g><g id="SVGRepo_iconCarrier"><path d="M251.172 116.594L139.4 4.828c-6.433-6.437-16.873-6.437-23.314 0l-23.21 23.21 29.443 29.443c6.842-2.312 14.688-.761 20.142 4.693 5.48 5.489 7.02 13.402 4.652 20.266l28.375 28.376c6.865-2.365 14.786-.835 20.269 4.657 7.663 7.66 7.663 20.075 0 27.74-7.665 7.666-20.08 7.666-27.749 0-5.764-5.77-7.188-14.235-4.27-21.336l-26.462-26.462-.003 69.637a19.82 19.82 0 0 1 5.188 3.71c7.663 7.66 7.663 20.076 0 27.747-7.665 7.662-20.086 7.662-27.74 0-7.663-7.671-7.663-20.086 0-27.746a19.654 19.654 0 0 1 6.421-4.281V94.196a19.378 19.378 0 0 1-6.421-4.281c-5.806-5.798-7.202-14.317-4.227-21.446L81.47 39.442l-76.64 76.635c-6.44 6.443-6.44 16.884 0 23.322l111.774 111.768c6.435 6.438 16.873 6.438 23.316 0l111.251-111.249c6.438-6.44 6.438-16.887 0-23.324" fill="#DE4C36"></path></g></svg>
+        </span>
+        <strong>Git</strong>
+        {% if collector.available and (collector.changedFilesCount > 0 or (collector.hasUpstream and collector.unpushedCommitsCount > 0)) %}
+            <span class="count">
+                <span>{{ collector.changedFilesCount }}</span>
+                <span>{{ collector.hasUpstream ? collector.unpushedCommitsCount : 0 }}</span>
+            </span>
+        {% endif %}
+    </span>
+{% endblock %}
+
+{% block panel %}
+    <h2>Git</h2>
+
+    {% if collector.available %}
+        <div class="metrics">
+            <div class="metric">
+                <span class="value">{{ collector.branch }}</span>
+                <span class="label">Branch</span>
+            </div>
+            <div class="metric">
+                <span class="value"><code>{{ collector.shortCommit }}</code></span>
+                <span class="label">Short commit</span>
+            </div>
+            <div class="metric">
+                <span class="value">{{ collector.changedFilesCount }}</span>
+                <span class="label">Modified files</span>
+            </div>
+            <div class="metric">
+                <span class="value">{{ collector.hasUpstream ? collector.unpushedCommitsCount : '–' }}</span>
+                <span class="label">Unpushed commits</span>
+            </div>
+        </div>
+
+        {% if collector.graphRows is not empty %}
+            <style>
+                .git-graph { margin: 15px 0; }
+                .git-graph-row { display: flex; align-items: center; height: 28px; }
+                .git-graph-row:hover { background: rgba(128, 128, 128, .08); }
+                .git-graph-row svg { display: block; flex: none; margin-right: 10px; }
+                .git-graph-hash { flex: none; width: 75px; }
+                .git-graph-subject { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding-right: 10px; }
+                .git-graph-author { flex: none; width: 140px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+                {# Font-relative width + tabular digits: a px width breaks as soon as the
+                   viewer's system font renders "YYYY-MM-DD HH:MM" wider, wrapping the date
+                   out of the fixed-height row. #}
+                .git-graph-date { flex: none; width: 17ch; text-align: right; white-space: nowrap; font-variant-numeric: tabular-nums; }
+                .git-badge { display: inline-block; padding: 0 6px; border-radius: 9px; font-size: 11px; line-height: 16px; margin-left: 6px; color: #fff; }
+                .git-badge-head { background: #de4c36; }
+                .git-badge-upstream { background: #4e79a7; }
+            </style>
+
+            <h3>Commit graph</h3>
+            <p class="text-muted">
+                Recent commits of <code>HEAD</code>{% if collector.hasUpstream %} and its upstream <code>{{ collector.upstreamRef }}</code>{% endif %}.
+                {% if collector.hasUpstream %}Hollow dots are commits not pushed to the upstream yet.{% endif %}
+            </p>
+
+            {# One 28px-high SVG per row: lane lines in the cell, commit details beside. #}
+            {% set laneWidth = 16 %}
+            {% set rowHeight = 28 %}
+            {% set laneColors = ['#4e79a7', '#f28e2b', '#59a14f', '#b07aa1', '#e15759', '#76b7b2'] %}
+            {% set laneColorCount = laneColors|length %}
+            {% set centerY = rowHeight / 2 %}
+
+            <div class="git-graph">
+                {% for row in collector.graphRows %}
+                    <div class="git-graph-row">
+                        <svg width="{{ collector.graphLaneCount * laneWidth }}" height="{{ rowHeight }}" xmlns="http://www.w3.org/2000/svg">
+                            {% for lane in row.incomingLanes %}
+                                {% set x = lane * laneWidth + laneWidth / 2 %}
+                                <line x1="{{ x }}" y1="0" x2="{{ x }}" y2="{{ centerY }}" stroke="{{ laneColors[lane % laneColorCount] }}" stroke-width="2"/>
+                            {% endfor %}
+                            {% for segment in row.segments %}
+                                {% set x1 = segment.from * laneWidth + laneWidth / 2 %}
+                                {% set x2 = segment.to * laneWidth + laneWidth / 2 %}
+                                {% if segment.from == segment.to %}
+                                    <line x1="{{ x1 }}" y1="{{ centerY }}" x2="{{ x1 }}" y2="{{ rowHeight }}" stroke="{{ laneColors[segment.from % laneColorCount] }}" stroke-width="2"/>
+                                {% else %}
+                                    {# Vertical tangents at both ends so the curve joins the straight lines seamlessly. #}
+                                    <path d="M {{ x1 }} {{ centerY }} C {{ x1 }} {{ rowHeight }}, {{ x2 }} {{ centerY }}, {{ x2 }} {{ rowHeight }}" fill="none" stroke="{{ laneColors[max(segment.from, segment.to) % laneColorCount] }}" stroke-width="2"/>
+                                {% endif %}
+                            {% endfor %}
+                            {% set dotX = row.lane * laneWidth + laneWidth / 2 %}
+                            {% set dotColor = laneColors[row.lane % laneColorCount] %}
+                            {# Hollow only when "not pushed" is meaningful — without an upstream every dot stays filled. #}
+                            <circle cx="{{ dotX }}" cy="{{ centerY }}" r="4" stroke="{{ dotColor }}" stroke-width="2" fill="{{ collector.hasUpstream and not row.isPushed ? 'var(--base-0, #fff)' : dotColor }}"/>
+                        </svg>
+                        <span class="git-graph-hash"><code>{{ row.shortHash }}</code></span>
+                        <span class="git-graph-subject">
+                            {{ row.subject }}
+                            {# On a detached checkout the branch name is the literal "HEAD". #}
+                            {% if row.isHead %}<span class="git-badge git-badge-head">{{ collector.branch == 'HEAD' ? 'HEAD' : 'HEAD → ' ~ collector.branch }}</span>{% endif %}
+                            {% if row.isUpstream %}<span class="git-badge git-badge-upstream">{{ collector.upstreamRef }}</span>{% endif %}
+                        </span>
+                        <span class="git-graph-author text-muted">{{ row.author }}</span>
+                        <span class="git-graph-date text-muted">{{ row.date|date('Y-m-d H:i') }}</span>
+                    </div>
+                {% endfor %}
+            </div>
+        {% endif %}
+
+        <h3>Locally modified files</h3>
+        {% if collector.workingFiles is empty %}
+            <div class="empty">
+                <p>Working tree clean — no modified files.</p>
+            </div>
+        {% else %}
+            <table>
+                <thead>
+                    <tr>
+                        <th>File</th>
+                        <th>Status</th>
+                        <th>Stage</th>
+                        <th>+/-</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for file in collector.workingFiles %}
+                        <tr>
+                            <td>
+                                <code>{{ file.path }}</code>
+                                {% if file.oldPath %}<span class="text-muted">(formerly <code>{{ file.oldPath }}</code>)</span>{% endif %}
+                            </td>
+                            <td>{{ file.statusLabel }}</td>
+                            <td>{{ file.stageLabel }}</td>
+                            <td>{% if file.status != 'untracked' %}<span class="text-muted">+{{ file.additions }} −{{ file.deletions }}</span>{% endif %}</td>
+                        </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        {% endif %}
+
+        <h3>Unpushed commits</h3>
+        {% if collector.hasUpstream and collector.behindCommitsCount > 0 %}
+            <p class="text-muted">{{ collector.behindCommitsCount }} commit{{ collector.behindCommitsCount > 1 ? 's' }} behind <code>{{ collector.upstreamRef }}</code> (since the last fetch).</p>
+        {% endif %}
+        {% if not collector.hasUpstream %}
+            <div class="empty">
+                <p>No upstream branch configured for this branch.</p>
+            </div>
+        {% elseif collector.unpushedCommits is empty %}
+            <div class="empty">
+                <p>Up to date with upstream — nothing to push.</p>
+            </div>
+        {% else %}
+            <table>
+                <thead>
+                    <tr>
+                        <th>Commit</th>
+                        <th>Message</th>
+                        <th>Author</th>
+                        <th>Date</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for commit in collector.unpushedCommits %}
+                        <tr>
+                            <td><code>{{ commit.shortHash }}</code></td>
+                            <td>{{ commit.subject }}</td>
+                            <td>{{ commit.author }}</td>
+                            <td>{{ commit.date|date('Y-m-d H:i') }}</td>
+                        </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+
+            <h4>Files touched by these commits</h4>
+            {% if collector.unpushedFiles is empty %}
+                <div class="empty">
+                    <p>No files (empty commits or merge).</p>
+                </div>
+            {% else %}
+                <table>
+                    <thead>
+                        <tr>
+                            <th>File</th>
+                            <th>Status</th>
+                            <th>+/-</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for file in collector.unpushedFiles %}
+                            <tr>
+                                <td>
+                                    <code>{{ file.path }}</code>
+                                    {% if file.oldPath %}<span class="text-muted">(formerly <code>{{ file.oldPath }}</code>)</span>{% endif %}
+                                </td>
+                                <td>{{ file.statusLabel }}</td>
+                                <td><span class="text-muted">+{{ file.additions }} −{{ file.deletions }}</span></td>
+                            </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            {% endif %}
+        {% endif %}
+    {% else %}
+        <div class="empty">
+            <p>This directory is not a Git repository (or “git” is unavailable).</p>
+        </div>
+    {% endif %}
+
+    <h3>Git commands</h3>
+    {% if collector.commands is empty %}
+        <div class="empty">
+            <p>No git command was run.</p>
+        </div>
+    {% else %}
+        <p class="text-muted">{{ collector.commands|length }} command{{ collector.commands|length > 1 ? 's' }} in {{ collector.commandsDuration|number_format(1) }} ms.</p>
+        <table>
+            <thead>
+                <tr>
+                    <th>Command</th>
+                    <th>Duration</th>
+                    <th>Status</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for command in collector.commands %}
+                    <tr>
+                        <td><code>{{ command.command }}</code></td>
+                        <td>{{ command.durationMs|number_format(1) }}&nbsp;ms</td>
+                        <td>
+                            {% if command.successful %}
+                                OK
+                            {% else %}
+                                <span class="status-error">Failed</span>
+                                {% if command.error %}<span class="text-muted">{{ command.error }}</span>{% endif %}
+                            {% endif %}
+                        </td>
+                    </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    {% endif %}
+{% endblock %}

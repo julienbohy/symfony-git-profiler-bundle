@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- [Git panel guide](https://github.com/julienbohy/symfony-git-profiler-bundle/blob/main/docs/git-panel.md): what each part of the panel shows (toolbar, summary cards,
+  commit graph, local changes, ahead/behind/diverged, detached HEAD, no upstream), the git commands
+  it runs, configuration, performance and limitations, with a screenshot of each state.
+
+### Changed
+
+- README screenshots refreshed to the current panel, with a link to the guide.
+
 ## [0.3.1] - 2026-11-05
 
 ### Changed

@@ -11,6 +11,8 @@ use JulienBohy\GitProfilerBundle\Git\Command\TraceableGitCommandRunner;
 use JulienBohy\GitProfilerBundle\Git\GitInfo;
 use JulienBohy\GitProfilerBundle\Git\GitRepositoryInterface;
 use JulienBohy\GitProfilerBundle\Git\GraphCommit;
+use JulienBohy\GitProfilerBundle\Git\UnpushedCommit;
+use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
 use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpFoundation\Response;
@@ -92,6 +94,116 @@ final class GitTemplateRenderingTest extends TestCase
         self::assertStringContainsString('git-badge-head">HEAD<', $html);
     }
 
+    public function testDetachedHeadIsLabelledAsDetached(): void
+    {
+        $html = $this->render(new GitInfo('HEAD', 'abc1234', false));
+
+        self::assertStringContainsString('<span class="label">Detached HEAD</span>', $html);
+        self::assertStringContainsString('<span class="value">detached</span>', $html);
+        self::assertStringContainsString('<b>Detached HEAD</b>', $html);
+        self::assertStringNotContainsString('<span class="value">HEAD</span>', $html);
+        self::assertStringNotContainsString('<span class="label">Branch</span>', $html);
+        self::assertStringContainsString('Detached HEAD — no branch, so no upstream to compare with.', $html);
+        self::assertStringNotContainsString('for this branch', $html);
+    }
+
+    public function testRealBranchWithoutUpstreamKeepsTheNoUpstreamMessage(): void
+    {
+        $html = $this->render(new GitInfo('feature/x', 'abc1234', false));
+
+        self::assertStringContainsString('<span class="label">Branch</span>', $html);
+        self::assertStringContainsString('<span class="value">feature/x</span>', $html);
+        self::assertStringContainsString('No upstream branch configured for this branch.', $html);
+        self::assertStringNotContainsString('Detached HEAD', $html);
+    }
+
+    public function testBehindCardShowsADashWithoutUpstream(): void
+    {
+        $html = $this->render(new GitInfo('main', 'abc1234', false));
+
+        self::assertMatchesRegularExpression('#<span class="value">–</span>\s*<span class="label">Behind upstream</span>#', $html);
+    }
+
+    #[DataProvider('behindCounts')]
+    public function testBehindCard(int $behind): void
+    {
+        $html = $this->render(new GitInfo('main', 'abc1234', false, hasUpstream: true, upstreamRef: 'origin/main', behindCount: $behind));
+
+        self::assertMatchesRegularExpression('#<span class="value">' . $behind . '</span>\s*<span class="label">Behind upstream</span>#', $html);
+    }
+
+    /**
+     * @return iterable<string, array{int}>
+     */
+    public static function behindCounts(): iterable
+    {
+        yield 'up to date' => [0];
+        yield 'behind' => [3];
+    }
+
+    public function testNothingToPushButBehindRendersOneCoherentMessage(): void
+    {
+        $html = $this->render(new GitInfo('main', 'abc1234', false, hasUpstream: true, upstreamRef: 'origin/main', behindCount: 3));
+
+        self::assertStringContainsString("Nothing to push. <code>origin/main</code> has 3 commits you don't have yet (as of the last fetch).", $html);
+        self::assertStringNotContainsString('Up to date with upstream', $html);
+        self::assertStringNotContainsString('Also 3 commits behind', $html);
+    }
+
+    public function testSingularBehindMessage(): void
+    {
+        $html = $this->render(new GitInfo('main', 'abc1234', false, hasUpstream: true, upstreamRef: 'origin/main', behindCount: 1));
+
+        self::assertStringContainsString("has 1 commit you don't have yet", $html);
+    }
+
+    public function testUpToDateMessageWhenNeitherAheadNorBehind(): void
+    {
+        $html = $this->render(new GitInfo('main', 'abc1234', false, hasUpstream: true, upstreamRef: 'origin/main'));
+
+        self::assertStringContainsString('Up to date with upstream — nothing to push.', $html);
+        self::assertStringNotContainsString('Nothing to push.', $html);
+    }
+
+    public function testAheadAndBehindShowsTheBehindLineAboveTheTable(): void
+    {
+        $html = $this->render(new GitInfo(
+            'main',
+            'abc1234',
+            false,
+            hasUpstream: true,
+            unpushedCommits: [new UnpushedCommit('aaaaaaa', 'local work', 'Alice', new \DateTimeImmutable('2026-08-14T10:00:00+00:00'))],
+            upstreamRef: 'origin/main',
+            behindCount: 2,
+        ));
+
+        $behindLine = strpos($html, 'Also 2 commits behind <code>origin/main</code> (as of the last fetch).');
+        self::assertNotFalse($behindLine);
+        self::assertLessThan(strpos($html, 'Files touched by these commits') ?: \PHP_INT_MAX, $behindLine);
+        self::assertStringContainsString('local work', $html);
+        self::assertStringNotContainsString('Nothing to push', $html);
+        self::assertStringNotContainsString('Up to date with upstream', $html);
+    }
+
+    public function testDatesAreEmittedAsTimeElementsConvertedToTheUserTimezone(): void
+    {
+        $html = $this->render(new GitInfo(
+            'main',
+            'abc1234',
+            false,
+            hasUpstream: true,
+            unpushedCommits: [new UnpushedCommit('aaaaaaa', 'local work', 'Alice', new \DateTimeImmutable('2026-08-14T10:00:00+02:00'))],
+            graphCommits: [
+                new GraphCommit(str_repeat('a', 40), 'aaaaaaa', [], 'local work', 'Alice', new \DateTimeImmutable('2026-08-14T10:00:00+02:00'), isHead: true),
+            ],
+            upstreamRef: 'origin/main',
+        ));
+
+        // Once in the commit graph, once in the unpushed commits table.
+        self::assertSame(2, substr_count($html, '<time data-convert-to-user-timezone data-render-as-datetime datetime="2026-08-14T10:00:00+02:00">'));
+        self::assertMatchesRegularExpression('#<time [^>]*>2026-08-14 \d{2}:\d{2} \S+</time>#', $html);
+    }
+
     public function testOmitsTheCommitGraphWhenThereAreNoGraphCommits(): void
     {
         $html = $this->render(new GitInfo('main', 'abc1234', false));
@@ -104,7 +216,7 @@ final class GitTemplateRenderingTest extends TestCase
         $html = $this->render(new GitInfo('main', 'abc1234', false, hasUpstream: true, upstreamRef: 'origin/main', behindCount: 2));
 
         self::assertStringContainsString('&#8595; 2', $html);
-        self::assertStringContainsString('2 commits behind <code>origin/main</code> (since the last fetch).', $html);
+        self::assertStringContainsString('has 2 commits you don\'t have yet (as of the last fetch).', $html);
     }
 
     public function testHidesTheBehindCountWhenNothingIsBehind(): void

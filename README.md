@@ -39,6 +39,9 @@ The **commit graph** — `HEAD` and its upstream at a glance, merges and diverge
 
 ![Commit graph in the Git profiler panel](docs/assets/git-graph.png)
 
+For a tour of each panel section, the git commands it runs and how it behaves in edge cases, see the
+**[Git panel guide](docs/git-panel.md)**.
+
 ## Requirements
 
 - PHP **8.3+**

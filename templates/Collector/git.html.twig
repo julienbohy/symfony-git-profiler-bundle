@@ -7,7 +7,7 @@
     Without JS, the server-side text is shown.
 #}
 {% macro commitTime(date) -%}
-    <time class="git-local-time" datetime="{{ date|date('c') }}">{{ date|date('Y-m-d H:i') }}</time>
+    <time class="git-local-time" datetime="{{ date|date('c', false) }}">{{ date|date('Y-m-d H:i') }}</time>
 {%- endmacro %}
 
 {% block toolbar %}

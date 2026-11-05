@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- The panel's "Behind upstream" count is now a summary card (shown as "–" without an upstream).
+  When nothing is ahead but the upstream is, the "Unpushed commits" section shows a single
+  coherent message instead of both "behind" and "up to date"; when both ahead and behind, the
+  behind line is worded "Also N commits behind … (as of the last fetch)".
+
+### Fixed
+
+- Commit dates are now shown in the viewer's timezone (like the rest of the profiler) instead of
+  UTC, keeping the compact `YYYY-MM-DD HH:MM` format; without JavaScript the server-side date is
+  shown.
+- A detached HEAD is now shown as "Detached HEAD" (instead of a branch named "HEAD") in the panel
+  and the toolbar, and the unpushed section no longer talks about "this branch".
+- The toolbar counters no longer touch the branch name: they are now spaced apart.
+
 ## [0.3.0] - 2026-11-05
 
 ### Added

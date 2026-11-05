@@ -28,6 +28,13 @@ final class GitDataCollectorTest extends TestCase
         (new GitDataCollector($repository))->collect(new Request(), new Response());
     }
 
+    public function testDetectsADetachedHead(): void
+    {
+        self::assertTrue($this->collectorReturning(new GitInfo('HEAD', 'abc1234', false))->isDetached());
+        self::assertFalse($this->collectorReturning(new GitInfo('main', 'abc1234', false))->isDetached());
+        self::assertFalse($this->collectorReturning(null)->isDetached());
+    }
+
     public function testExposesTheBehindCount(): void
     {
         $collector = $this->collectorReturning(new GitInfo('main', 'abc1234', false, hasUpstream: true, upstreamRef: 'origin/main', behindCount: 3));

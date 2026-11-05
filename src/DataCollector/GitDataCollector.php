@@ -86,6 +86,14 @@ final class GitDataCollector extends AbstractDataCollector implements LateDataCo
         return $this->data['branch'] ?? null;
     }
 
+    /**
+     * True when HEAD points at a commit rather than a branch (git reports the branch as "HEAD").
+     */
+    public function isDetached(): bool
+    {
+        return $this->isAvailable() && $this->getBranch() === 'HEAD';
+    }
+
     public function getShortCommit(): ?string
     {
         return $this->data['shortCommit'] ?? null;

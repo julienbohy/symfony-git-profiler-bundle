@@ -16,9 +16,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- Commit dates are now rendered as `<time data-convert-to-user-timezone>` elements, so the
-  profiler converts them to the viewer's timezone like its own dates (the server-side fallback
-  text includes its timezone). The graph date column is widened accordingly.
+- Commit dates are now shown in the viewer's timezone (like the rest of the profiler) instead of
+  UTC, keeping the compact `YYYY-MM-DD HH:MM` format; without JavaScript the server-side date is
+  shown.
 - A detached HEAD is now shown as "Detached HEAD" (instead of a branch named "HEAD") in the panel
   and the toolbar, and the unpushed section no longer talks about "this branch".
 - The toolbar counters no longer touch the branch name: they are now spaced apart.

@@ -1,12 +1,13 @@
 {% extends '@WebProfiler/Profiler/layout.html.twig' %}
 
 {#
-    Commit date as a <time> element. The profiler's JS (SymfonyProfiler#convertDateTimesToUserTimezone,
-    Symfony >= 6.4) rewrites every time[data-convert-to-user-timezone] into the viewer's timezone;
-    the server-side text (with its zone) stays readable where that hook is missing or JS is off.
+    Commit date as a <time> element holding the ISO date. A small script at the end of the panel
+    rewrites it in the viewer's timezone, keeping the compact "YYYY-MM-DD HH:MM" format (the
+    profiler's own conversion only offers a long or a US-style format, too wide for the graph).
+    Without JS, the server-side text is shown.
 #}
 {% macro commitTime(date) -%}
-    <time data-convert-to-user-timezone data-render-as-datetime datetime="{{ date|date('c') }}">{{ date|date('Y-m-d H:i T') }}</time>
+    <time class="git-local-time" datetime="{{ date|date('c') }}">{{ date|date('Y-m-d H:i') }}</time>
 {%- endmacro %}
 
 {% block toolbar %}
@@ -105,9 +106,9 @@
                 .git-graph-subject { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding-right: 10px; }
                 .git-graph-author { flex: none; width: 140px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
                 {# Font-relative width + tabular digits: a px width breaks as soon as the
-                   viewer's system font renders the date wider, wrapping it out of the
-                   fixed-height row. 32ch fits the profiler JS format ("August 14, 2026 at 10:00:00 AM"). #}
-                .git-graph-date { flex: none; width: 32ch; text-align: right; white-space: nowrap; font-variant-numeric: tabular-nums; }
+                   viewer's system font renders "YYYY-MM-DD HH:MM" wider, wrapping the date
+                   out of the fixed-height row. #}
+                .git-graph-date { flex: none; width: 17ch; text-align: right; white-space: nowrap; font-variant-numeric: tabular-nums; }
                 .git-badge { display: inline-block; padding: 0 6px; border-radius: 9px; font-size: 11px; line-height: 16px; margin-left: 6px; color: #fff; }
                 .git-badge-head { background: #de4c36; }
                 .git-badge-upstream { background: #4e79a7; }
@@ -305,4 +306,21 @@
             </tbody>
         </table>
     {% endif %}
+
+    <script{% if csp_script_nonce is defined and csp_script_nonce %} nonce="{{ csp_script_nonce }}"{% endif %}>
+        (() => {
+            const pad = (n) => String(n).padStart(2, '0');
+            const zone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+            document.querySelectorAll('time.git-local-time').forEach((time) => {
+                const date = new Date(time.getAttribute('datetime'));
+                if (isNaN(date)) {
+                    return;
+                }
+                time.textContent = `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}`;
+                if (zone) {
+                    time.title = `Shown in your timezone: ${zone}`;
+                }
+            });
+        })();
+    </script>
 {% endblock %}

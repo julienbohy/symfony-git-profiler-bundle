@@ -200,8 +200,10 @@ final class GitTemplateRenderingTest extends TestCase
         ));
 
         // Once in the commit graph, once in the unpushed commits table.
-        self::assertSame(2, substr_count($html, '<time data-convert-to-user-timezone data-render-as-datetime datetime="2026-08-14T10:00:00+02:00">'));
-        self::assertMatchesRegularExpression('#<time [^>]*>2026-08-14 \d{2}:\d{2} \S+</time>#', $html);
+        self::assertSame(2, substr_count($html, '<time class="git-local-time" datetime="2026-08-14T10:00:00+02:00">'));
+        self::assertMatchesRegularExpression('#<time class="git-local-time" [^>]*>2026-08-14 \d{2}:\d{2}</time>#', $html);
+        // The script that rewrites them in the viewer's timezone ships with the panel.
+        self::assertStringContainsString("querySelectorAll('time.git-local-time')", $html);
     }
 
     public function testOmitsTheCommitGraphWhenThereAreNoGraphCommits(): void

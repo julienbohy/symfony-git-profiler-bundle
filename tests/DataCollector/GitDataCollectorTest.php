@@ -16,6 +16,8 @@ use JulienBohy\GitProfilerBundle\Git\GitRepositoryInterface;
 use JulienBohy\GitProfilerBundle\Git\GraphCommit;
 use JulienBohy\GitProfilerBundle\Git\Operation;
 use JulienBohy\GitProfilerBundle\Git\OperationKind;
+use JulienBohy\GitProfilerBundle\Git\Remote\GitProvider;
+use JulienBohy\GitProfilerBundle\Git\Remote\RemoteRepository;
 use JulienBohy\GitProfilerBundle\Git\UnpushedCommit;
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
@@ -339,6 +341,135 @@ final class GitDataCollectorTest extends TestCase
     {
         self::assertSame('git_profiler', $this->collectorReturning(null)->getName());
         self::assertSame('@GitProfiler/Collector/git.html.twig', GitDataCollector::getTemplate());
+    }
+
+    public function testExposesTheRemoteLinks(): void
+    {
+        $collector = $this->collectorReturning($this->linkedInfo());
+
+        self::assertSame(['provider' => 'GitHub', 'url' => 'https://github.com/o/r'], $collector->getRemote());
+        self::assertSame('https://github.com/o/r/tree/feature/x', $collector->getUpstreamUrl());
+        self::assertNull($collector->getCompareUrl());
+    }
+
+    public function testOnlyPushedGraphCommitsGetAUrl(): void
+    {
+        $rows = $this->collectorReturning($this->linkedInfo())->getGraphRows();
+
+        self::assertCount(2, $rows);
+        self::assertArrayHasKey('url', $rows[0]);
+        self::assertNull($rows[0]['url']);
+        self::assertSame('https://github.com/o/r/commit/' . str_repeat('b', 40), $rows[1]['url'] ?? null);
+    }
+
+    public function testNoUrlWithoutARemote(): void
+    {
+        $info = $this->linkedInfo(remote: false);
+        $collector = $this->collectorReturning($info);
+
+        self::assertNull($collector->getRemote());
+        self::assertNull($collector->getUpstreamUrl());
+        self::assertNull($collector->getCompareUrl());
+        self::assertArrayHasKey('url', $collector->getGraphRows()[1]);
+        self::assertNull($collector->getGraphRows()[1]['url']);
+    }
+
+    public function testNoUpstreamUrlWithoutAnUpstreamBranch(): void
+    {
+        $collector = $this->collectorReturning($this->linkedInfo(upstreamBranch: null, behind: 2));
+
+        self::assertNotNull($collector->getRemote());
+        self::assertNull($collector->getUpstreamUrl());
+        self::assertNull($collector->getCompareUrl());
+    }
+
+    public function testBehindAndNotAheadGivesACompareUrl(): void
+    {
+        $collector = $this->collectorReturning($this->linkedInfo(behind: 2));
+
+        self::assertSame('https://github.com/o/r/compare/' . str_repeat('a', 40) . '...feature/x', $collector->getCompareUrl());
+    }
+
+    public function testNoCompareUrlWhenAheadNotBehindOrWithoutHead(): void
+    {
+        $unpushed = [new UnpushedCommit('aaaaaaa', 'local', 'Ada', new \DateTimeImmutable('2026-08-14T10:00:00+00:00'))];
+
+        self::assertNull($this->collectorReturning($this->linkedInfo(behind: 2, unpushed: $unpushed))->getCompareUrl());
+        self::assertNull($this->collectorReturning($this->linkedInfo(behind: 0))->getCompareUrl());
+        self::assertNull($this->collectorReturning($this->linkedInfo(behind: 2, withHead: false))->getCompareUrl());
+    }
+
+    public function testNoCompareUrlWhenTheProviderHasNoComparePage(): void
+    {
+        $info = $this->linkedInfo(behind: 2, provider: GitProvider::Bitbucket);
+
+        self::assertNull($this->collectorReturning($info)->getCompareUrl());
+        self::assertSame('https://github.com/o/r/branch/feature/x', $this->collectorReturning($info)->getUpstreamUrl());
+    }
+
+    public function testExposesTheVersionAndTheStashCount(): void
+    {
+        $collector = $this->collectorReturning(new GitInfo('main', 'abc1234', false, describe: '0.4.0-3-g2897d71', stashCount: 2));
+
+        self::assertSame('0.4.0-3-g2897d71', $collector->getDescribe());
+        self::assertSame(2, $collector->getStashCount());
+    }
+
+    public function testVersionAndStashesDefaultToNothing(): void
+    {
+        foreach ([new GitInfo('main', 'abc1234', false), null] as $info) {
+            $collector = $this->collectorReturning($info);
+
+            self::assertNull($collector->getDescribe());
+            self::assertSame(0, $collector->getStashCount());
+            self::assertNull($collector->getRemote());
+            self::assertNull($collector->getUpstreamUrl());
+            self::assertNull($collector->getCompareUrl());
+        }
+    }
+
+    public function testAProfileCollectedBeforeTheLinksExistedStillReads(): void
+    {
+        $collector = new GitDataCollector($this->createStub(GitRepositoryInterface::class));
+        (new \ReflectionProperty(GitDataCollector::class, 'data'))->setValue($collector, ['available' => true, 'branch' => 'main']);
+
+        self::assertTrue($collector->isAvailable());
+        self::assertNull($collector->getRemote());
+        self::assertNull($collector->getDescribe());
+        self::assertSame(0, $collector->getStashCount());
+        self::assertSame([], $collector->getGraphRows());
+    }
+
+    /**
+     * @param list<UnpushedCommit> $unpushed
+     */
+    private function linkedInfo(
+        bool $remote = true,
+        ?string $upstreamBranch = 'feature/x',
+        int $behind = 0,
+        array $unpushed = [],
+        bool $withHead = true,
+        GitProvider $provider = GitProvider::GitHub,
+    ): GitInfo {
+        $head = str_repeat('a', 40);
+        $pushed = str_repeat('b', 40);
+
+        return new GitInfo(
+            'feature/x',
+            'aaaaaaa',
+            false,
+            hasUpstream: true,
+            unpushedCommits: $unpushed,
+            graphCommits: [
+                new GraphCommit($head, 'aaaaaaa', [$pushed], 'local work', 'Ada', new \DateTimeImmutable('2026-08-14T10:00:00+00:00'), isHead: true),
+                new GraphCommit($pushed, 'bbbbbbb', [], 'init', 'Ada', new \DateTimeImmutable('2026-08-14T09:00:00+00:00'), isUpstream: true, isPushed: true),
+            ],
+            upstreamRef: 'origin/feature/x',
+            behindCount: $behind,
+            remote: $remote ? new RemoteRepository($provider, 'https://github.com/o/r') : null,
+            upstreamBranch: $upstreamBranch,
+            headHash: $withHead ? $head : null,
+        );
     }
 
     private function collectorReturning(?GitInfo $info): GitDataCollector

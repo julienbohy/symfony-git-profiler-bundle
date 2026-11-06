@@ -17,6 +17,9 @@ use JulienBohy\GitProfilerBundle\Git\GitRepositoryInterface;
 use JulienBohy\GitProfilerBundle\Git\GraphCommit;
 use JulienBohy\GitProfilerBundle\Git\Operation;
 use JulienBohy\GitProfilerBundle\Git\OperationKind;
+use JulienBohy\GitProfilerBundle\Git\Remote\GitProvider;
+use JulienBohy\GitProfilerBundle\Git\Remote\RemoteRepository;
+use JulienBohy\GitProfilerBundle\Git\Remote\RemoteUrlParser;
 use JulienBohy\GitProfilerBundle\Git\UnpushedCommit;
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
@@ -413,6 +416,147 @@ final class GitTemplateRenderingTest extends TestCase
         self::assertStringContainsString('<span class="value">main</span>', $html);
     }
 
+    public function testOnlyPushedCommitsAreLinked(): void
+    {
+        $html = $this->render($this->linkedInfo());
+
+        $url = 'https://github.com/o/r/commit/' . str_repeat('b', 40);
+        self::assertStringContainsString('<a href="' . $url . '" target="_blank" rel="noopener noreferrer"><code>bbbbbbb</code></a>', $html);
+        // The unpushed HEAD commit would be a 404: plain text.
+        self::assertStringContainsString('<span class="git-graph-hash"><code>aaaaaaa</code></span>', $html);
+        self::assertSame(1, substr_count($html, '/commit/'));
+    }
+
+    public function testTheUpstreamBadgeLinksToTheRemoteBranch(): void
+    {
+        $html = $this->render($this->linkedInfo());
+
+        self::assertStringContainsString('<span class="git-badge git-badge-upstream"><a href="https://github.com/o/r/tree/feature/x" target="_blank" rel="noopener noreferrer">origin/feature/x</a></span>', $html);
+        self::assertStringContainsString('Pushed commits link to <a href="https://github.com/o/r" target="_blank" rel="noopener noreferrer">GitHub</a>.', $html);
+    }
+
+    public function testEveryExternalLinkOpensInANewTabWithoutOpenerAccess(): void
+    {
+        $html = $this->render($this->linkedInfo(behind: 2));
+
+        $links = substr_count($html, '<a href="https://');
+        self::assertGreaterThanOrEqual(4, $links);
+        self::assertSame($links, substr_count($html, ' target="_blank" rel="noopener noreferrer">'));
+        self::assertSame(0, preg_match('#<a href="(?!https://)#', $html));
+    }
+
+    public function testNoLinkWithoutARemote(): void
+    {
+        $html = $this->render($this->linkedInfo(remote: false, behind: 2));
+
+        self::assertStringNotContainsString('<a href', $html);
+        self::assertStringNotContainsString('_blank', $html);
+        self::assertStringContainsString('<span class="git-badge git-badge-upstream">origin/feature/x</span>', $html);
+        self::assertStringContainsString('<span class="git-graph-hash"><code>bbbbbbb</code></span>', $html);
+        self::assertStringNotContainsString('Pushed commits link to', $html);
+        self::assertStringNotContainsString('Compare on', $html);
+    }
+
+    public function testCompareLinkWhenBehindAndNotAhead(): void
+    {
+        $html = $this->render($this->linkedInfo(behind: 2));
+
+        self::assertStringContainsString('<a href="https://github.com/o/r/compare/' . str_repeat('a', 40) . '...feature/x" target="_blank" rel="noopener noreferrer">Compare on GitHub</a>', $html);
+        self::assertStringContainsString('Nothing to push.', $html);
+    }
+
+    public function testNoCompareLinkWhenInSyncOrAhead(): void
+    {
+        self::assertStringNotContainsString('Compare on', $this->render($this->linkedInfo()));
+
+        $ahead = [new UnpushedCommit('aaaaaaa', 'local', 'Ada', new \DateTimeImmutable('2026-08-14T10:00:00+00:00'))];
+        self::assertStringNotContainsString('Compare on', $this->render($this->linkedInfo(behind: 2, unpushed: $ahead)));
+    }
+
+    public function testCompareLinkNamesTheProvider(): void
+    {
+        self::assertStringContainsString('Compare on GitLab</a>', $this->render($this->linkedInfo(behind: 1, provider: GitProvider::GitLab)));
+        self::assertStringNotContainsString('Compare on', $this->render($this->linkedInfo(behind: 1, provider: GitProvider::Bitbucket)));
+    }
+
+    public function testCredentialsOfTheRemoteUrlNeverReachTheOutput(): void
+    {
+        $remote = (new RemoteUrlParser())->parse('https://octocat:s3cr3t-token@github.com/o/r.git');
+        self::assertNotNull($remote);
+
+        $html = $this->render($this->linkedInfo(behind: 2, repository: $remote));
+
+        self::assertStringContainsString('https://github.com/o/r/commit/', $html);
+        self::assertStringNotContainsString('s3cr3t', $html);
+        self::assertStringNotContainsString('octocat', $html);
+        self::assertStringNotContainsString('@github.com', $html);
+    }
+
+    public function testVersionAndStashesAreShownAsCardsAndInTheToolbarTooltip(): void
+    {
+        $html = $this->render(new GitInfo('main', 'abc1234', false, describe: '0.4.0-3-g2897d71', stashCount: 2));
+
+        self::assertStringContainsString('<span class="value"><code>0.4.0-3-g2897d71</code></span>', $html);
+        self::assertStringContainsString('<span class="label">Version</span>', $html);
+        self::assertStringContainsString('<span class="value">2</span>' . "\n" . '                    <span class="label">Stashes</span>', $html);
+        self::assertStringContainsString('<b>Version</b>' . "\n" . '                    <span>0.4.0-3-g2897d71</span>', $html);
+        self::assertStringContainsString('<b>Stashes</b>' . "\n" . '                    <span>2</span>', $html);
+    }
+
+    public function testVersionAndStashesAreHiddenWhenThereIsNothingToShow(): void
+    {
+        $html = $this->render(new GitInfo('main', 'abc1234', false));
+
+        self::assertStringNotContainsString('Version', $html);
+        self::assertStringNotContainsString('Stashes', $html);
+    }
+
+    public function testAProfileCollectedBeforeTheLinksExistedStillRenders(): void
+    {
+        $repository = $this->createStub(GitRepositoryInterface::class);
+        $collector = new GitDataCollector($repository);
+        (new \ReflectionProperty(GitDataCollector::class, 'data'))->setValue($collector, [
+            'available' => true,
+            'branch' => 'main',
+            'shortCommit' => 'abc1234',
+            'hasUpstream' => true,
+            'upstreamRef' => 'origin/main',
+            'graphLaneCount' => 1,
+            'graphRows' => [['shortHash' => 'abc1234', 'subject' => 'init', 'author' => 'Ada', 'date' => '2026-08-14T10:00:00+00:00', 'lane' => 0, 'incomingLanes' => [], 'segments' => [], 'isHead' => true, 'isUpstream' => true, 'isPushed' => true]],
+        ]);
+
+        $html = $this->renderCollector($collector);
+
+        self::assertStringContainsString('<code>abc1234</code>', $html);
+        self::assertStringNotContainsString('<a href', $html);
+    }
+
+    /**
+     * @param list<UnpushedCommit> $unpushed
+     */
+    private function linkedInfo(bool $remote = true, int $behind = 0, array $unpushed = [], GitProvider $provider = GitProvider::GitHub, ?RemoteRepository $repository = null): GitInfo
+    {
+        $head = str_repeat('a', 40);
+        $pushed = str_repeat('b', 40);
+
+        return new GitInfo(
+            'feature/x',
+            'aaaaaaa',
+            false,
+            hasUpstream: true,
+            unpushedCommits: $unpushed,
+            graphCommits: [
+                new GraphCommit($head, 'aaaaaaa', [$pushed], 'local work', 'Ada', new \DateTimeImmutable('2026-08-14T10:00:00+00:00'), isHead: true),
+                new GraphCommit($pushed, 'bbbbbbb', [], 'init', 'Ada', new \DateTimeImmutable('2026-08-14T09:00:00+00:00'), isUpstream: true, isPushed: true),
+            ],
+            upstreamRef: 'origin/feature/x',
+            behindCount: $behind,
+            remote: $remote ? ($repository ?? new RemoteRepository($provider, 'https://github.com/o/r')) : null,
+            upstreamBranch: 'feature/x',
+            headHash: $head,
+        );
+    }
+
     private function render(GitInfo $info, ?TraceableGitCommandRunner $tracer = null, ?\Closure $readGit = null): string
     {
         $repository = $this->createStub(GitRepositoryInterface::class);
@@ -426,6 +570,11 @@ final class GitTemplateRenderingTest extends TestCase
         $collector->collect(new Request(), new Response());
         $collector->lateCollect();
 
+        return $this->renderCollector($collector);
+    }
+
+    private function renderCollector(GitDataCollector $collector): string
+    {
         $bundleLoader = new FilesystemLoader();
         $bundleLoader->addPath(\dirname(__DIR__, 2) . '/templates', 'GitProfiler');
 

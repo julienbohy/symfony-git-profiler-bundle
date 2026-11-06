@@ -11,7 +11,11 @@ use JulienBohy\GitProfilerBundle\Git\Command\ProcessGitCommandRunner;
 use JulienBohy\GitProfilerBundle\Git\Command\TraceableGitCommandRunner;
 use JulienBohy\GitProfilerBundle\Git\FileStage;
 use JulienBohy\GitProfilerBundle\Git\FileStatus;
+use JulienBohy\GitProfilerBundle\Git\GitDirectory;
 use JulienBohy\GitProfilerBundle\Git\GitRepository;
+use JulienBohy\GitProfilerBundle\Git\OperationDetector;
+use JulienBohy\GitProfilerBundle\Git\StashCounter;
+use JulienBohy\GitProfilerBundle\Git\TagPresence;
 use JulienBohy\GitProfilerBundle\Tests\Support\GitRepositoryInitializer;
 use JulienBohy\GitProfilerBundle\Tests\Support\RecordingLogger;
 use JulienBohy\GitProfilerBundle\Tests\Support\TemporaryDirectory;
@@ -435,17 +439,17 @@ final class GitRepositoryTest extends TestCase
         self::assertFalse($info->hasUpstream);
     }
 
-    public function testACleanRepositoryRunsThreeGitCommands(): void
+    public function testACleanRepositoryRunsFiveGitCommands(): void
     {
         $this->initRepositoryWithCommit();
         $this->configureUpstream();
 
         $this->repository($this->dir)->read();
 
-        self::assertCount(3, $this->tracer->getTraces());
+        self::assertCount(5, $this->tracer->getTraces());
     }
 
-    public function testADirtyRepositoryAheadOfItsUpstreamRunsSevenGitCommands(): void
+    public function testADirtyRepositoryAheadOfItsUpstreamRunsNineGitCommands(): void
     {
         $this->initRepositoryWithCommit();
         $this->configureUpstream();
@@ -458,7 +462,7 @@ final class GitRepositoryTest extends TestCase
 
         $this->repository($this->dir)->read();
 
-        self::assertCount(7, $this->tracer->getTraces());
+        self::assertCount(9, $this->tracer->getTraces());
     }
 
     public function testAFailingSectionIsLoggedAndOnlyThatSectionIsEmpty(): void
@@ -545,7 +549,17 @@ final class GitRepositoryTest extends TestCase
         $this->tracer = new TraceableGitCommandRunner(new ProcessGitCommandRunner($directory));
         $this->logger = new RecordingLogger();
 
-        return new GitRepository($this->tracer, graphCommitLimit: $graphCommitLimit, logger: $this->logger);
+        // The production wiring: status, show, rev-parse, graph and config always run (stashes and tag presence read files; describe needs a tag).
+        $gitDirectory = new GitDirectory($this->tracer, $directory);
+
+        return new GitRepository(
+            $this->tracer,
+            graphCommitLimit: $graphCommitLimit,
+            logger: $this->logger,
+            operationDetector: new OperationDetector($this->tracer, $directory, $this->logger, $gitDirectory),
+            stashCounter: new StashCounter($gitDirectory),
+            tagPresence: new TagPresence($gitDirectory),
+        );
     }
 
     private function initRepositoryWithCommit(): void

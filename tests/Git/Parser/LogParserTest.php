@@ -73,6 +73,22 @@ final class LogParserTest extends TestCase
         self::assertSame('ccccccc', $commits[2]->shortHash);
     }
 
+    public function testShortHashesAreTheFirstSevenCharacters(): void
+    {
+        $hash = '0123456789abcdef0123456789abcdef01234567';
+
+        $unpushed = (new LogParser())->unpushedCommits(implode(self::S, [$hash, 'Ada', self::DATE, 's']) . "\n");
+        $graph = (new LogParser())->graphCommits(implode(self::S, [$hash, '', 'Ada', self::DATE, 's']) . "\n", $hash, null, [], false);
+
+        self::assertSame('0123456', $unpushed[0]->shortHash);
+        self::assertSame('0123456', $graph[0]->shortHash);
+    }
+
+    public function testBlankOutputGivesNoHashes(): void
+    {
+        self::assertSame([], (new LogParser())->commitHashes("  \n"));
+    }
+
     public function testGraphCommitsWithoutUpstreamAreNeverPushedNorUpstream(): void
     {
         $output = implode(self::S, [self::A, '', 'Ada', self::DATE, 'only']) . "\n";

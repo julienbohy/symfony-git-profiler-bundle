@@ -1,0 +1,90 @@
+name: Quality
+
+on:
+  workflow_call:
+
+permissions:
+  contents: read
+
+jobs:
+  quality:
+    name: Static analysis, coding standard and mutation testing
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Trust the workspace for Git
+        run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
+
+      # PHP 8.3 is the lowest supported version; pcov provides the coverage Infection needs.
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.3'
+          coverage: pcov
+
+      - name: Install dependencies
+        run: composer update --prefer-dist --no-progress --no-interaction
+
+      - name: PHPStan
+        run: composer phpstan
+
+      - name: PHP CS Fixer
+        run: composer cs
+
+      - name: Infection (git output parsers)
+        run: vendor/bin/infection --threads=2 --no-progress --show-mutations
+
+  minimum-git:
+    name: PHPUnit on git ${{ matrix.git }} (minimum supported)
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        git: ['2.11.0']
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Cache git ${{ matrix.git }} build
+        id: git-cache
+        uses: actions/cache@v4
+        with:
+          path: ~/git-${{ matrix.git }}
+          key: git-${{ matrix.git }}-${{ runner.os }}-${{ runner.arch }}-v1
+
+      - name: Build git ${{ matrix.git }} from source
+        if: steps.git-cache.outputs.cache-hit != 'true'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends build-essential zlib1g-dev gettext
+          curl -fsSL "https://www.kernel.org/pub/software/scm/git/git-${{ matrix.git }}.tar.xz" -o "$RUNNER_TEMP/git.tar.xz"
+          mkdir "$RUNNER_TEMP/git-src"
+          tar -xJf "$RUNNER_TEMP/git.tar.xz" -C "$RUNNER_TEMP/git-src" --strip-components=1
+          make -C "$RUNNER_TEMP/git-src" -j"$(nproc)" prefix="$HOME/git-${{ matrix.git }}" \
+            NO_OPENSSL=1 NO_CURL=1 NO_EXPAT=1 NO_TCLTK=1 NO_PERL=1 NO_PYTHON=1 NO_GETTEXT=1 \
+            CFLAGS="-O2 -g0 -fcommon" all
+          make -C "$RUNNER_TEMP/git-src" prefix="$HOME/git-${{ matrix.git }}" \
+            NO_OPENSSL=1 NO_CURL=1 NO_EXPAT=1 NO_TCLTK=1 NO_PERL=1 NO_PYTHON=1 NO_GETTEXT=1 \
+            CFLAGS="-O2 -g0 -fcommon" install
+
+      - name: Put git ${{ matrix.git }} first in PATH
+        run: |
+          echo "$HOME/git-${{ matrix.git }}/bin" >> "$GITHUB_PATH"
+
+      - name: Show git version
+        run: |
+          which git
+          git --version
+          test "$(git --version)" = "git version ${{ matrix.git }}"
+
+      - name: Trust the workspace for Git
+        run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
+
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.3'
+          coverage: none
+
+      - name: Install dependencies
+        run: composer update --prefer-dist --no-progress --no-interaction
+
+      - name: PHPUnit
+        run: vendor/bin/phpunit

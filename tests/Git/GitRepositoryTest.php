@@ -12,12 +12,17 @@ use JulienBohy\GitProfilerBundle\Git\Command\TraceableGitCommandRunner;
 use JulienBohy\GitProfilerBundle\Git\FileStage;
 use JulienBohy\GitProfilerBundle\Git\FileStatus;
 use JulienBohy\GitProfilerBundle\Git\GitRepository;
+use JulienBohy\GitProfilerBundle\Tests\Support\GitRepositoryInitializer;
 use JulienBohy\GitProfilerBundle\Tests\Support\RecordingLogger;
+use JulienBohy\GitProfilerBundle\Tests\Support\TemporaryDirectory;
 use PHPUnit\Framework\TestCase;
 use Symfony\Component\Process\Process;
 
 final class GitRepositoryTest extends TestCase
 {
+    use GitRepositoryInitializer;
+    use TemporaryDirectory;
+
     private string $dir;
     private string $remoteDir;
     private TraceableGitCommandRunner $tracer;
@@ -44,7 +49,7 @@ final class GitRepositoryTest extends TestCase
 
     public function testReturnsNullOnRepositoryWithoutCommits(): void
     {
-        $this->git('init', '-b', 'main');
+        $this->initGitRepository($this->dir);
 
         self::assertNull($this->repository($this->dir)->read());
     }
@@ -82,7 +87,7 @@ final class GitRepositoryTest extends TestCase
     public function testReadsASubmodule(): void
     {
         // A submodule's `.git` is a file whose `gitdir:` path is relative.
-        (new Process(['git', 'init', '-b', 'main', $this->remoteDir]))->mustRun();
+        $this->initGitRepository($this->remoteDir);
         foreach ([['config', 'user.email', 'test@example.com'], ['config', 'user.name', 'Test'], ['commit', '--allow-empty', '-m', 'sub']] as $args) {
             (new Process(['git', ...$args], $this->remoteDir))->mustRun();
         }
@@ -545,7 +550,7 @@ final class GitRepositoryTest extends TestCase
 
     private function initRepositoryWithCommit(): void
     {
-        $this->git('init', '-b', 'main');
+        $this->initGitRepository($this->dir);
         $this->git('config', 'user.email', 'test@example.com');
         $this->git('config', 'user.name', 'Test');
         file_put_contents($this->dir . '/file.txt', "hello\n");
@@ -555,7 +560,7 @@ final class GitRepositoryTest extends TestCase
 
     private function configureUpstream(): void
     {
-        (new Process(['git', 'init', '--bare', '-b', 'main', $this->remoteDir]))->mustRun();
+        $this->initGitRepository($this->remoteDir, bare: true);
         $this->git('remote', 'add', 'origin', $this->remoteDir);
         $this->git('push', '-u', 'origin', 'main');
     }
@@ -578,19 +583,5 @@ final class GitRepositoryTest extends TestCase
     private function git(string ...$args): void
     {
         (new Process(['git', ...$args], $this->dir))->mustRun();
-    }
-
-    private function removeDirectory(string $directory): void
-    {
-        $items = new \RecursiveIteratorIterator(
-            new \RecursiveDirectoryIterator($directory, \FilesystemIterator::SKIP_DOTS),
-            \RecursiveIteratorIterator::CHILD_FIRST,
-        );
-
-        foreach ($items as $item) {
-            $item->isDir() ? rmdir($item->getPathname()) : unlink($item->getPathname());
-        }
-
-        rmdir($directory);
     }
 }

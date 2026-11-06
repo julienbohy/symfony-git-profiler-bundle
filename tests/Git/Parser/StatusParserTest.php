@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace JulienBohy\GitProfilerBundle\Tests\Git\Parser;
 
 use JulienBohy\GitProfilerBundle\Git\Parser\StatusParser;
+use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
 
 final class StatusParserTest extends TestCase
@@ -46,6 +47,56 @@ final class StatusParserTest extends TestCase
         self::assertTrue($status->hasUpstreamTracking);
         self::assertSame(2, $status->ahead);
         self::assertSame(3, $status->behind);
+    }
+
+    public function testAnEmptyRecordDoesNotStopTheParsing(): void
+    {
+        $status = $this->parse(['# branch.oid ' . self::OID, '', '? untracked.txt']);
+
+        self::assertSame(['untracked.txt'], $status->untracked);
+    }
+
+    public function testAHeaderWithoutValueHasAnEmptyValue(): void
+    {
+        $status = $this->parse(['# branch.oid ' . self::OID, '# branch.upstream', '# unknown']);
+
+        self::assertSame('', $status->upstream);
+        self::assertSame(self::OID, $status->oid);
+    }
+
+    #[DataProvider('malformedAheadBehind')]
+    public function testAMalformedAheadBehindIsIgnored(string $value): void
+    {
+        $status = $this->parse(['# branch.oid ' . self::OID, '# branch.ab ' . $value]);
+
+        self::assertFalse($status->hasUpstreamTracking);
+        self::assertSame(0, $status->ahead);
+        self::assertSame(0, $status->behind);
+    }
+
+    /**
+     * @return iterable<string, array{string}>
+     */
+    public static function malformedAheadBehind(): iterable
+    {
+        yield 'leading garbage' => ['x+4 -5'];
+        yield 'trailing garbage' => ['+4 -5 x'];
+    }
+
+    public function testOnlyStagedEntriesAreNotUnstaged(): void
+    {
+        $status = $this->parse(['# branch.oid ' . self::OID, '1 M. N... 100644 100644 100644 aaa bbb a.txt']);
+
+        self::assertTrue($status->hasStaged);
+        self::assertFalse($status->hasUnstaged);
+    }
+
+    public function testOnlyUnstagedEntriesAreNotStaged(): void
+    {
+        $status = $this->parse(['# branch.oid ' . self::OID, '1 .M N... 100644 100644 100644 aaa aaa a.txt']);
+
+        self::assertFalse($status->hasStaged);
+        self::assertTrue($status->hasUnstaged);
     }
 
     public function testUpstreamWhoseRefIsGoneHasNoTracking(): void
@@ -96,7 +147,7 @@ final class StatusParserTest extends TestCase
     {
         $status = $this->parse([
             '# branch.oid ' . self::OID, '# branch.head main',
-            "? dir/with space.txt", "? line\nbreak.txt", '! ignored.log',
+            '? dir/with space.txt', "? line\nbreak.txt", '! ignored.log',
         ]);
 
         self::assertSame(['dir/with space.txt', "line\nbreak.txt"], $status->untracked);

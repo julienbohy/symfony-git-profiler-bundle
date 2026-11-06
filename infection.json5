@@ -1,0 +1,17 @@
+{
+    "$schema": "vendor/infection/infection/resources/schema.json",
+    "source": {
+        "directories": ["src/Git/Parser"]
+    },
+    "phpUnit": {
+        "configDir": "."
+    },
+    "logs": {
+        "text": ".infection/infection.log"
+    },
+    "mutators": {
+        "@default": true
+    },
+    "minMsi": 96,
+    "minCoveredMsi": 96
+}

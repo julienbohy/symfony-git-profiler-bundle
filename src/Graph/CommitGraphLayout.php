@@ -125,9 +125,9 @@ final class CommitGraphLayout implements CommitGraphLayoutInterface
      * Lines waiting for that commit converge on its lane; the others go
      * straight down. Merge lines start from their dot and join their lane.
      *
-     * @param array<int, ?string>          $lanes
-     * @param array<int, int>              $origins
-     * @param list<array{0: int, 1: int}>  $joins
+     * @param array<int, ?string>         $lanes
+     * @param array<int, int>             $origins
+     * @param list<array{0: int, 1: int}> $joins
      *
      * @return list<GraphSegment>
      */

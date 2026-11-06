@@ -17,7 +17,25 @@ use Symfony\Bundle\FrameworkBundle\DataCollector\AbstractDataCollector;
 use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpFoundation\Response;
 use Symfony\Component\HttpKernel\DataCollector\LateDataCollectorInterface;
+use Symfony\Component\VarDumper\Cloner\Data;
 
+/**
+ * @phpstan-type CollectedData array{
+ *     available?: bool,
+ *     branch?: ?string,
+ *     shortCommit?: ?string,
+ *     dirty?: bool,
+ *     workingFiles?: list<array{path: string, status: string, statusLabel: string, stage: string, stageLabel: string, oldPath: ?string, additions: int, deletions: int}>,
+ *     hasUpstream?: bool,
+ *     unpushedCommits?: list<array{shortHash: string, subject: string, author: string, date: string}>,
+ *     unpushedFiles?: list<array{path: string, status: string, statusLabel: string, stage: string, stageLabel: string, oldPath: ?string, additions: int, deletions: int}>,
+ *     graphRows?: list<array{shortHash: string, subject: string, author: string, date: string, lane: int, incomingLanes: list<int>, segments: list<array{from: int, to: int}>, isHead: bool, isUpstream: bool, isPushed: bool}>,
+ *     graphLaneCount?: int,
+ *     upstreamRef?: ?string,
+ *     behindCount?: int,
+ *     commands?: list<array{command: string, durationMs: float, successful: bool, error: ?string}>,
+ * }
+ */
 final class GitDataCollector extends AbstractDataCollector implements LateDataCollectorInterface
 {
     public function __construct(
@@ -41,23 +59,40 @@ final class GitDataCollector extends AbstractDataCollector implements LateDataCo
 
         $info = $this->repository->read();
 
-        $graph = $this->graphLayout->layout($info?->graphCommits ?? []);
+        $graph = $this->graphLayout->layout($info->graphCommits ?? []);
 
         $this->data = [
             'available' => $info !== null,
             'branch' => $info?->branch,
             'shortCommit' => $info?->shortCommit,
-            'dirty' => $info?->isDirty ?? false,
-            'workingFiles' => array_map($this->flattenFile(...), $info?->workingFiles ?? []),
-            'hasUpstream' => $info?->hasUpstream ?? false,
-            'unpushedCommits' => array_map($this->flattenCommit(...), $info?->unpushedCommits ?? []),
-            'unpushedFiles' => array_map($this->flattenFile(...), $info?->unpushedFiles ?? []),
+            'dirty' => $info->isDirty ?? false,
+            'workingFiles' => array_map($this->flattenFile(...), $info->workingFiles ?? []),
+            'hasUpstream' => $info->hasUpstream ?? false,
+            'unpushedCommits' => array_map($this->flattenCommit(...), $info->unpushedCommits ?? []),
+            'unpushedFiles' => array_map($this->flattenFile(...), $info->unpushedFiles ?? []),
             'graphRows' => $this->flattenGraph($graph),
             'graphLaneCount' => $graph->laneCount,
             'upstreamRef' => $info?->upstreamRef,
-            'behindCount' => $info?->behindCount ?? 0,
+            'behindCount' => $info->behindCount ?? 0,
             'commands' => array_map($this->flattenTrace(...), \array_slice($this->tracer?->getTraces() ?? [], $from)),
         ];
+    }
+
+    /**
+     * @return CollectedData
+     */
+    private function collected(): array
+    {
+        // The parent property is untyped on Symfony 6.4 and typed `array|Data` from 7.x, so it cannot be
+        // redeclared here: narrow it locally instead. Keys are absent until lateCollect() ran.
+        if ($this->data instanceof Data) {
+            return [];
+        }
+
+        /** @var CollectedData $collected */
+        $collected = $this->data;
+
+        return $collected;
     }
 
     public function reset(): void
@@ -71,19 +106,19 @@ final class GitDataCollector extends AbstractDataCollector implements LateDataCo
         return 'git_profiler';
     }
 
-    public static function getTemplate(): ?string
+    public static function getTemplate(): string
     {
         return '@GitProfiler/Collector/git.html.twig';
     }
 
     public function isAvailable(): bool
     {
-        return $this->data['available'] ?? false;
+        return $this->collected()['available'] ?? false;
     }
 
     public function getBranch(): ?string
     {
-        return $this->data['branch'] ?? null;
+        return $this->collected()['branch'] ?? null;
     }
 
     /**
@@ -96,12 +131,12 @@ final class GitDataCollector extends AbstractDataCollector implements LateDataCo
 
     public function getShortCommit(): ?string
     {
-        return $this->data['shortCommit'] ?? null;
+        return $this->collected()['shortCommit'] ?? null;
     }
 
     public function isDirty(): bool
     {
-        return $this->data['dirty'] ?? false;
+        return $this->collected()['dirty'] ?? false;
     }
 
     /**
@@ -109,7 +144,7 @@ final class GitDataCollector extends AbstractDataCollector implements LateDataCo
      */
     public function getWorkingFiles(): array
     {
-        return $this->data['workingFiles'] ?? [];
+        return $this->collected()['workingFiles'] ?? [];
     }
 
     /**
@@ -117,7 +152,7 @@ final class GitDataCollector extends AbstractDataCollector implements LateDataCo
      */
     public function getUnpushedFiles(): array
     {
-        return $this->data['unpushedFiles'] ?? [];
+        return $this->collected()['unpushedFiles'] ?? [];
     }
 
     /**
@@ -125,12 +160,12 @@ final class GitDataCollector extends AbstractDataCollector implements LateDataCo
      */
     public function getUnpushedCommits(): array
     {
-        return $this->data['unpushedCommits'] ?? [];
+        return $this->collected()['unpushedCommits'] ?? [];
     }
 
     public function hasUpstream(): bool
     {
-        return $this->data['hasUpstream'] ?? false;
+        return $this->collected()['hasUpstream'] ?? false;
     }
 
     /**
@@ -138,17 +173,17 @@ final class GitDataCollector extends AbstractDataCollector implements LateDataCo
      */
     public function getGraphRows(): array
     {
-        return $this->data['graphRows'] ?? [];
+        return $this->collected()['graphRows'] ?? [];
     }
 
     public function getGraphLaneCount(): int
     {
-        return $this->data['graphLaneCount'] ?? 0;
+        return $this->collected()['graphLaneCount'] ?? 0;
     }
 
     public function getUpstreamRef(): ?string
     {
-        return $this->data['upstreamRef'] ?? null;
+        return $this->collected()['upstreamRef'] ?? null;
     }
 
     public function getUnpushedCommitsCount(): int
@@ -161,7 +196,7 @@ final class GitDataCollector extends AbstractDataCollector implements LateDataCo
      */
     public function getBehindCommitsCount(): ?int
     {
-        return $this->hasUpstream() ? ($this->data['behindCount'] ?? 0) : null;
+        return $this->hasUpstream() ? ($this->collected()['behindCount'] ?? 0) : null;
     }
 
     /**
@@ -169,7 +204,7 @@ final class GitDataCollector extends AbstractDataCollector implements LateDataCo
      */
     public function getCommands(): array
     {
-        return $this->data['commands'] ?? [];
+        return $this->collected()['commands'] ?? [];
     }
 
     public function getCommandsDuration(): float

@@ -13,6 +13,11 @@ final class RecordingLogger extends AbstractLogger
      */
     public array $records = [];
 
+    /**
+     * Left untyped: psr/log 1.x (still supported) declares an untyped signature.
+     *
+     * @param string|\Stringable $message
+     */
     public function log($level, $message, array $context = []): void
     {
         $this->records[] = ['level' => $level, 'message' => (string) $message, 'context' => $context];

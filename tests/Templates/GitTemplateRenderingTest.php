@@ -457,6 +457,24 @@ final class GitTemplateRenderingTest extends TestCase
         self::assertStringNotContainsString('Compare on', $html);
     }
 
+    public function testNoLinkAnnouncementWithoutAnUpstream(): void
+    {
+        // Detached HEAD or a branch without upstream: no commit is known to be pushed, so none is linked.
+        $html = $this->render(new GitInfo(
+            'HEAD',
+            'aaaaaaa',
+            false,
+            graphCommits: [
+                new GraphCommit(str_repeat('a', 40), 'aaaaaaa', [], 'work', 'Ada', new \DateTimeImmutable('2026-08-14T10:00:00+00:00'), isHead: true),
+            ],
+            remote: new RemoteRepository(GitProvider::GitHub, 'https://github.com/o/r'),
+            headHash: str_repeat('a', 40),
+        ));
+
+        self::assertStringNotContainsString('Pushed commits link to', $html);
+        self::assertStringNotContainsString('/commit/', $html);
+    }
+
     public function testCompareLinkWhenBehindAndNotAhead(): void
     {
         $html = $this->render($this->linkedInfo(behind: 2));

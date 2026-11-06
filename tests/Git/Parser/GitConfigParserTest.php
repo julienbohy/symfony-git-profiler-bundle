@@ -110,6 +110,27 @@ final class GitConfigParserTest extends TestCase
         ]), 'main'));
     }
 
+    public function testOnlyExactBranchRemoteKeysSelectTheRemote(): void
+    {
+        // Keys that merely contain "branch.<name>.remote" must not redirect to another remote.
+        $remote = (new GitConfigParser())->remote($this->config([
+            'remote.origin.url=git@github.com:o/origin.git',
+            'remote.fork.url=git@github.com:me/fork.git',
+            'xbranch.main.remote=fork',
+            'branch.main.remotex=fork',
+        ]), 'main');
+
+        self::assertNotNull($remote);
+        self::assertSame('origin', $remote->name);
+    }
+
+    public function testAValueIsKeptWholeEvenWithSeveralNewlines(): void
+    {
+        $remote = (new GitConfigParser())->remote("remote.origin.url\nfirst\nsecond\nthird\0", 'main');
+
+        self::assertSame("first\nsecond\nthird", $remote?->url);
+    }
+
     public function testValuesMayContainNewlinesAndKeysMayHaveNoValue(): void
     {
         $output = "core.bare\0alias.x\nline1\nline2\0remote.origin.url\ngit@github.com:o/r.git\0";

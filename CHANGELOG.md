@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-11-06
+
 ### Added
 
 - Links to the remote: in the commit graph, the hashes of pushed commits link to their page on
@@ -142,7 +144,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - List of commits ahead of the upstream branch, with the files they touch.
 - Graceful degradation when the directory is not a Git repository or `git` is unavailable.
 
-[Unreleased]: https://github.com/julienbohy/symfony-git-profiler-bundle/compare/0.4.0...HEAD
+[Unreleased]: https://github.com/julienbohy/symfony-git-profiler-bundle/compare/0.5.0...HEAD
+[0.5.0]: https://github.com/julienbohy/symfony-git-profiler-bundle/compare/0.4.0...0.5.0
 [0.4.0]: https://github.com/julienbohy/symfony-git-profiler-bundle/compare/0.3.2...0.4.0
 [0.3.2]: https://github.com/julienbohy/symfony-git-profiler-bundle/compare/0.3.1...0.3.2
 [0.3.1]: https://github.com/julienbohy/symfony-git-profiler-bundle/compare/0.3.0...0.3.1

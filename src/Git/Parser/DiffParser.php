@@ -49,15 +49,15 @@ final class DiffParser
                 continue;
             }
 
-            if (preg_match('/^(\d+|-)\t(\d+|-)\t(.*)$/s', $field, $matches) === 1) {
-                $path = $matches[3];
+            if (preg_match('/^(?<added>\d+|-)\t(?<deleted>\d+|-)\t(?<path>.*)/s', $field, $matches) === 1) {
+                $path = $matches['path'];
                 if ($path === '') {
                     // Rename: "<add>\t<del>\t" followed by the old and the new path fields.
                     ++$i;
                     $path = $fields[++$i] ?? '';
                 }
 
-                $counts[$path] = [(int) $matches[1], (int) $matches[2]]; // "-" (binary) casts to 0
+                $counts[$path] = [(int) $matches['added'], (int) $matches['deleted']]; // "-" (binary) casts to 0
             }
         }
 

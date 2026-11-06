@@ -54,10 +54,10 @@ final class StatusParser
                         $upstream = $value;
                         break;
                     case 'branch.ab':
-                        if (preg_match('/^\+(\d+) -(\d+)$/', $value, $matches) === 1) {
+                        if (preg_match('/^\+(?<ahead>\d+) -(?<behind>\d+)$/', $value, $matches) === 1) {
                             $hasTracking = true;
-                            $ahead = (int) $matches[1];
-                            $behind = (int) $matches[2];
+                            $ahead = (int) $matches['ahead'];
+                            $behind = (int) $matches['behind'];
                         }
                         break;
                 }

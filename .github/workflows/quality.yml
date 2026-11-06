@@ -11,7 +11,7 @@ jobs:
     name: Static analysis, coding standard and mutation testing
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Trust the workspace for Git
         run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
@@ -41,7 +41,7 @@ jobs:
       matrix:
         git: ['2.11.0']
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Cache git ${{ matrix.git }} build
         id: git-cache

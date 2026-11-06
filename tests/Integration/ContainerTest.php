@@ -28,6 +28,7 @@ final class ContainerTest extends TestCase
 
         $tags = $container->getDefinition(GitDataCollector::class)->getTag('data_collector');
         self::assertCount(1, $tags);
+        self::assertIsArray($tags[0]);
         self::assertSame('git_profiler', $tags[0]['id']);
         self::assertSame('@GitProfiler/Collector/git.html.twig', $tags[0]['template']);
     }

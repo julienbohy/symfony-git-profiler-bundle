@@ -46,6 +46,11 @@ jobs:
         if: matrix.stability != 'stable'
         run: composer config minimum-stability ${{ matrix.stability }}
 
+      # The quality tools (quality.yml) pin recent Symfony components: keep them out of this matrix
+      # so the "lowest" job really resolves the lowest supported Symfony versions.
+      - name: Drop quality tools from the test matrix
+        run: composer remove --dev --no-update --no-interaction friendsofphp/php-cs-fixer infection/infection phpstan/phpstan phpstan/phpstan-phpunit
+
       - name: Install dependencies
         run: composer update --prefer-dist --no-progress --no-interaction ${{ matrix.dependencies == 'lowest' && '--prefer-lowest' || '' }}
 

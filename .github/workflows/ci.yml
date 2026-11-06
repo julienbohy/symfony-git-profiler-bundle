@@ -11,3 +11,6 @@ permissions:
 jobs:
   tests:
     uses: ./.github/workflows/tests.yml
+
+  quality:
+    uses: ./.github/workflows/quality.yml

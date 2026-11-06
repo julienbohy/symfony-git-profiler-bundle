@@ -7,13 +7,14 @@ namespace JulienBohy\GitProfilerBundle\Tests\Git\Command;
 use JulienBohy\GitProfilerBundle\Exception\ExceptionInterface;
 use JulienBohy\GitProfilerBundle\Exception\GitCommandFailedException;
 use JulienBohy\GitProfilerBundle\Git\Command\ProcessGitCommandRunner;
+use JulienBohy\GitProfilerBundle\Tests\Support\GitRepositoryInitializer;
 use JulienBohy\GitProfilerBundle\Tests\Support\TemporaryDirectory;
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
-use Symfony\Component\Process\Process;
 
 final class ProcessGitCommandRunnerTest extends TestCase
 {
+    use GitRepositoryInitializer;
     use TemporaryDirectory;
 
     private string $dir;
@@ -21,7 +22,7 @@ final class ProcessGitCommandRunnerTest extends TestCase
     protected function setUp(): void
     {
         $this->dir = $this->createTemporaryDirectory('gpb_runner_');
-        (new Process(['git', 'init', '-b', 'main'], $this->dir))->mustRun();
+        $this->initGitRepository($this->dir);
     }
 
     protected function tearDown(): void
@@ -105,7 +106,7 @@ final class ProcessGitCommandRunnerTest extends TestCase
     public function testIgnoresAnInheritedGitDir(): void
     {
         $other = $this->createTemporaryDirectory('gpb_other_');
-        (new Process(['git', 'init', '-b', 'main', $other]))->mustRun();
+        $this->initGitRepository($other);
 
         $previous = getenv('GIT_DIR');
         putenv('GIT_DIR=' . $other . '/.git');

@@ -15,6 +15,7 @@ use PHPUnit\Framework\TestCase;
 use Symfony\Component\Config\Definition\Exception\InvalidConfigurationException;
 use Symfony\Component\DependencyInjection\Compiler\MergeExtensionConfigurationPass;
 use Symfony\Component\DependencyInjection\ContainerBuilder;
+use Symfony\Component\DependencyInjection\Reference;
 
 final class GitProfilerBundleConfigurationTest extends TestCase
 {
@@ -50,7 +51,9 @@ final class GitProfilerBundleConfigurationTest extends TestCase
         $container->setParameter('kernel.environment', 'test');
         $container->setParameter('kernel.build_dir', sys_get_temp_dir());
         $container->setParameter('kernel.debug', true);
-        $container->registerExtension((new GitProfilerBundle())->getContainerExtension());
+        $extension = (new GitProfilerBundle())->getContainerExtension();
+        self::assertNotNull($extension);
+        $container->registerExtension($extension);
         $container->loadFromExtension('git_profiler', ['timeout' => '%env(float:GIT_PROFILER_TEST_TIMEOUT)%']);
 
         // The same pass the kernel runs while building the container.
@@ -115,6 +118,8 @@ final class GitProfilerBundleConfigurationTest extends TestCase
     {
         $arguments = self::load()->getDefinition(GitDataCollector::class)->getArguments();
 
+        self::assertInstanceOf(Reference::class, $arguments[1]);
+        self::assertInstanceOf(Reference::class, $arguments[2]);
         self::assertSame(CommitGraphLayoutInterface::class, (string) $arguments[1]);
         self::assertSame(TraceableGitCommandRunner::class, (string) $arguments[2]);
     }

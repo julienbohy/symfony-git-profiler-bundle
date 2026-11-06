@@ -71,10 +71,7 @@ final readonly class ProcessGitCommandRunner implements GitCommandRunnerInterfac
         if (!$process->isSuccessful()) {
             $stderr = trim($process->getErrorOutput());
 
-            throw GitCommandFailedException::fromArguments(
-                $args,
-                $stderr !== '' ? $stderr : \sprintf('exit code %d', (int) $process->getExitCode()),
-            );
+            throw GitCommandFailedException::fromArguments($args, $stderr !== '' ? $stderr : \sprintf('exit code %d', (int) $process->getExitCode()));
         }
 
         return $process->getOutput();

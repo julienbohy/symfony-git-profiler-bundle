@@ -123,8 +123,9 @@ final readonly class GitRepository implements GitRepositoryInterface
     }
 
     /**
+     * Returns [has upstream, commits, files, full hashes].
+     *
      * @return array{0: bool, 1: list<UnpushedCommit>, 2: list<ChangedFile>, 3: array<string, true>}
-     *               [has upstream, commits, files, full hashes]
      */
     private function unpushed(StatusSnapshot $status, bool $hasUpstream): array
     {

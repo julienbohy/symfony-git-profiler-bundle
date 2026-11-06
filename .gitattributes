@@ -7,3 +7,6 @@
 /.gitignore       export-ignore
 /phpunit.xml.dist export-ignore
 /CONTRIBUTING.md  export-ignore
+/phpstan.dist.neon export-ignore
+/.php-cs-fixer.dist.php export-ignore
+/infection.json5  export-ignore

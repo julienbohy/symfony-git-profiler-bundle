@@ -1,0 +1,17 @@
+includes:
+    - vendor/phpstan/phpstan-phpunit/extension.neon
+    - vendor/phpstan/phpstan-phpunit/rules.neon
+
+parameters:
+    level: max
+    paths:
+        - src
+        - tests
+    tmpDir: .phpstan.cache
+    ignoreErrors:
+        # Tests deliberately assert the runtime type/value of data that is only typed by PHPDoc or constants
+        # (collected profiler data, parser formats...): the assertion is the point of the test, not redundant.
+        -
+            identifier: staticMethod.alreadyNarrowedType
+            paths:
+                - tests/*

@@ -100,7 +100,10 @@ fi
 release_branch="release/$version"
 git checkout -b "$release_branch"
 git add "$CHANGELOG"
-git commit -m "chore(release): $version"
+# "[skip ci]": the PR is squash-merged and its branch deleted within seconds, so the
+# pull_request run would start on a ref that no longer exists and fail with no jobs.
+# The commit only promotes the CHANGELOG, already tested on main.
+git commit -m "chore(release): $version" -m "[skip ci]"
 git push origin "$release_branch"
 
 pr_url="$(gh pr create --base main --head "$release_branch" \

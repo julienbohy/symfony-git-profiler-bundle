@@ -6,12 +6,19 @@ use JulienBohy\GitProfilerBundle\DataCollector\GitDataCollector;
 use JulienBohy\GitProfilerBundle\Git\Command\GitCommandRunnerInterface;
 use JulienBohy\GitProfilerBundle\Git\Command\ProcessGitCommandRunner;
 use JulienBohy\GitProfilerBundle\Git\Command\TraceableGitCommandRunner;
+use JulienBohy\GitProfilerBundle\Git\GitDirectory;
 use JulienBohy\GitProfilerBundle\Git\GitRepository;
 use JulienBohy\GitProfilerBundle\Git\GitRepositoryInterface;
 use JulienBohy\GitProfilerBundle\Git\OperationDetector;
 use JulienBohy\GitProfilerBundle\Git\Parser\DiffParser;
+use JulienBohy\GitProfilerBundle\Git\Parser\GitConfigParser;
 use JulienBohy\GitProfilerBundle\Git\Parser\LogParser;
+use JulienBohy\GitProfilerBundle\Git\Parser\PackedRefsParser;
+use JulienBohy\GitProfilerBundle\Git\Parser\ReflogParser;
 use JulienBohy\GitProfilerBundle\Git\Parser\StatusParser;
+use JulienBohy\GitProfilerBundle\Git\Remote\RemoteUrlParser;
+use JulienBohy\GitProfilerBundle\Git\StashCounter;
+use JulienBohy\GitProfilerBundle\Git\TagPresence;
 use JulienBohy\GitProfilerBundle\Graph\CommitGraphLayout;
 use JulienBohy\GitProfilerBundle\Graph\CommitGraphLayoutInterface;
 use Symfony\Component\DependencyInjection\Loader\Configurator\ContainerConfigurator;
@@ -35,12 +42,26 @@ return static function (ContainerConfigurator $container): void {
     $services->set(StatusParser::class);
     $services->set(DiffParser::class);
     $services->set(LogParser::class);
+    $services->set(GitConfigParser::class);
+    $services->set(ReflogParser::class);
+    $services->set(PackedRefsParser::class);
+    $services->set(RemoteUrlParser::class);
+
+    $services->set(GitDirectory::class)
+        ->args([service(GitCommandRunnerInterface::class), param('kernel.project_dir')]);
+
+    $services->set(StashCounter::class)
+        ->args([service(GitDirectory::class), service(ReflogParser::class)]);
+
+    $services->set(TagPresence::class)
+        ->args([service(GitDirectory::class), service(PackedRefsParser::class)]);
 
     $services->set(OperationDetector::class)
         ->args([
             service(GitCommandRunnerInterface::class),
             param('kernel.project_dir'),
             service('logger')->nullOnInvalid(),
+            service(GitDirectory::class),
         ])
         ->tag('monolog.logger', ['channel' => 'git_profiler']);
 
@@ -53,6 +74,10 @@ return static function (ContainerConfigurator $container): void {
             param('git_profiler.graph_commit_limit'),
             service('logger')->nullOnInvalid(),
             service(OperationDetector::class),
+            service(GitConfigParser::class),
+            service(RemoteUrlParser::class),
+            service(StashCounter::class),
+            service(TagPresence::class),
         ])
         ->tag('monolog.logger', ['channel' => 'git_profiler']);
 

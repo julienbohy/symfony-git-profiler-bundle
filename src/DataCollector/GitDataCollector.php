@@ -8,9 +8,11 @@ use JulienBohy\GitProfilerBundle\Git\ChangedFile;
 use JulienBohy\GitProfilerBundle\Git\Command\GitCommandTrace;
 use JulienBohy\GitProfilerBundle\Git\Command\TraceableGitCommandRunner;
 use JulienBohy\GitProfilerBundle\Git\FileStatus;
+use JulienBohy\GitProfilerBundle\Git\GitInfo;
 use JulienBohy\GitProfilerBundle\Git\GitRepositoryInterface;
 use JulienBohy\GitProfilerBundle\Git\Operation;
 use JulienBohy\GitProfilerBundle\Git\OperationKind;
+use JulienBohy\GitProfilerBundle\Git\Remote\RemoteRepository;
 use JulienBohy\GitProfilerBundle\Git\UnpushedCommit;
 use JulienBohy\GitProfilerBundle\Graph\CommitGraph;
 use JulienBohy\GitProfilerBundle\Graph\CommitGraphLayout;
@@ -34,11 +36,16 @@ use Symfony\Component\VarDumper\Cloner\Data;
  *     hasUpstream?: bool,
  *     unpushedCommits?: list<array{shortHash: string, subject: string, author: string, date: string}>,
  *     unpushedFiles?: list<CollectedFile>,
- *     graphRows?: list<array{shortHash: string, subject: string, author: string, date: string, lane: int, incomingLanes: list<int>, segments: list<array{from: int, to: int}>, isHead: bool, isUpstream: bool, isPushed: bool}>,
+ *     graphRows?: list<array{shortHash: string, subject: string, author: string, date: string, lane: int, incomingLanes: list<int>, segments: list<array{from: int, to: int}>, isHead: bool, isUpstream: bool, isPushed: bool, url?: ?string}>,
  *     graphLaneCount?: int,
  *     upstreamRef?: ?string,
  *     behindCount?: int,
  *     operation?: ?CollectedOperation,
+ *     remote?: ?array{provider: string, url: string},
+ *     upstreamUrl?: ?string,
+ *     compareUrl?: ?string,
+ *     describe?: ?string,
+ *     stashCount?: int,
  *     commands?: list<array{command: string, durationMs: float, successful: bool, error: ?string}>,
  * }
  */
@@ -76,11 +83,16 @@ final class GitDataCollector extends AbstractDataCollector implements LateDataCo
             'hasUpstream' => $info->hasUpstream ?? false,
             'unpushedCommits' => array_map($this->flattenCommit(...), $info->unpushedCommits ?? []),
             'unpushedFiles' => array_map($this->flattenFile(...), $info->unpushedFiles ?? []),
-            'graphRows' => $this->flattenGraph($graph),
+            'graphRows' => $this->flattenGraph($graph, $info?->remote),
             'graphLaneCount' => $graph->laneCount,
             'upstreamRef' => $info?->upstreamRef,
             'behindCount' => $info->behindCount ?? 0,
             'operation' => $info?->operation !== null ? $this->flattenOperation($info->operation) : null,
+            'remote' => $info?->remote !== null ? ['provider' => $info->remote->provider->label(), 'url' => $info->remote->webUrl] : null,
+            'upstreamUrl' => $this->upstreamUrl($info),
+            'compareUrl' => $this->compareUrl($info),
+            'describe' => $info?->describe,
+            'stashCount' => $info->stashCount ?? 0,
             'commands' => array_map($this->flattenTrace(...), \array_slice($this->tracer?->getTraces() ?? [], $from)),
         ];
     }
@@ -176,7 +188,7 @@ final class GitDataCollector extends AbstractDataCollector implements LateDataCo
     }
 
     /**
-     * @return list<array{shortHash: string, subject: string, author: string, date: string, lane: int, incomingLanes: list<int>, segments: list<array{from: int, to: int}>, isHead: bool, isUpstream: bool, isPushed: bool}>
+     * @return list<array{shortHash: string, subject: string, author: string, date: string, lane: int, incomingLanes: list<int>, segments: list<array{from: int, to: int}>, isHead: bool, isUpstream: bool, isPushed: bool, url?: ?string}>
      */
     public function getGraphRows(): array
     {
@@ -191,6 +203,45 @@ final class GitDataCollector extends AbstractDataCollector implements LateDataCo
     public function getUpstreamRef(): ?string
     {
         return $this->collected()['upstreamRef'] ?? null;
+    }
+
+    /**
+     * The hosting service of the remote ("GitHub"...) and the web URL of the repository, null when unknown.
+     *
+     * @return ?array{provider: string, url: string}
+     */
+    public function getRemote(): ?array
+    {
+        return $this->collected()['remote'] ?? null;
+    }
+
+    /**
+     * Web page of the upstream branch on the remote.
+     */
+    public function getUpstreamUrl(): ?string
+    {
+        return $this->collected()['upstreamUrl'] ?? null;
+    }
+
+    /**
+     * Web page comparing HEAD with the upstream branch: only when the upstream is ahead and HEAD is not.
+     */
+    public function getCompareUrl(): ?string
+    {
+        return $this->collected()['compareUrl'] ?? null;
+    }
+
+    /**
+     * `git describe --tags` of HEAD, e.g. "0.4.0" or "0.4.0-3-g2897d71"; null without a reachable tag.
+     */
+    public function getDescribe(): ?string
+    {
+        return $this->collected()['describe'] ?? null;
+    }
+
+    public function getStashCount(): int
+    {
+        return $this->collected()['stashCount'] ?? 0;
     }
 
     public function getUnpushedCommitsCount(): int
@@ -326,10 +377,27 @@ final class GitDataCollector extends AbstractDataCollector implements LateDataCo
         ];
     }
 
+    private function upstreamUrl(?GitInfo $info): ?string
+    {
+        return $info?->remote !== null && $info->upstreamBranch !== null ? $info->remote->branchUrl($info->upstreamBranch) : null;
+    }
+
+    private function compareUrl(?GitInfo $info): ?string
+    {
+        // Behind and not ahead: HEAD is an ancestor of the upstream, so it exists on the remote.
+        if ($info?->remote === null || $info->upstreamBranch === null || $info->headHash === null || $info->unpushedCommits !== [] || $info->behindCount <= 0) {
+            return null;
+        }
+
+        return $info->remote->compareUrl($info->headHash, $info->upstreamBranch);
+    }
+
     /**
-     * @return list<array{shortHash: string, subject: string, author: string, date: string, lane: int, incomingLanes: list<int>, segments: list<array{from: int, to: int}>, isHead: bool, isUpstream: bool, isPushed: bool}>
+     * Only commits known to be on the remote get a URL: the others would be a 404.
+     *
+     * @return list<array{shortHash: string, subject: string, author: string, date: string, lane: int, incomingLanes: list<int>, segments: list<array{from: int, to: int}>, isHead: bool, isUpstream: bool, isPushed: bool, url: ?string}>
      */
-    private function flattenGraph(CommitGraph $graph): array
+    private function flattenGraph(CommitGraph $graph, ?RemoteRepository $remote): array
     {
         $rows = [];
         $previousSegments = [];
@@ -351,6 +419,7 @@ final class GitDataCollector extends AbstractDataCollector implements LateDataCo
                 'isHead' => $row->commit->isHead,
                 'isUpstream' => $row->commit->isUpstream,
                 'isPushed' => $row->commit->isPushed,
+                'url' => $remote !== null && $row->commit->isPushed ? $remote->commitUrl($row->commit->hash) : null,
             ];
 
             $previousSegments = $row->segments;

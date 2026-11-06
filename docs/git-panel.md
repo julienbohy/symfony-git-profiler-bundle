@@ -12,6 +12,8 @@ For installation, see the [README](../README.md).
 - [Commit graph](#commit-graph)
 - [Local changes](#local-changes)
 - [Ahead, behind, diverged](#ahead-behind-diverged)
+- [Links to the remote](#links-to-the-remote)
+- [Version and stashes](#version-and-stashes)
 - [Operations in progress and conflicts](#operations-in-progress-and-conflicts)
 - [Edge cases](#edge-cases)
 - [Git commands](#git-commands)
@@ -35,7 +37,7 @@ The segment shows the branch name followed by counters:
 | ↑ | Commits not pushed yet (`@{u}..HEAD`). Shows `–` when there is no upstream. |
 | ↓ | Commits on the upstream that you do not have, **as of the last fetch**. Only displayed when greater than 0. |
 
-Hovering opens the detail block: branch, short commit, and the same three numbers. While an
+Hovering opens the detail block: branch, short commit, the version and the number of stashes when there are some, and the same three numbers. While an
 operation is in progress the segment turns yellow (red with conflicts) and shows its label, e.g.
 `rebasing 3/7` (see [Operations in progress and conflicts](#operations-in-progress-and-conflicts)).
 
@@ -51,8 +53,10 @@ menu carries a `files / unpushed` badge when either number is non-zero.
 
 The panel opens with five cards: **Branch** (or **Detached HEAD**), **Short commit**, **Modified
 files**, **Unpushed commits** and **Behind upstream**. Cards without a meaning in the current state
-show `–` (no upstream, detached HEAD). A **Conflicts** card is added when files have unresolved
-merge conflicts, and a banner appears above the cards while an operation is in progress. Below come the commit graph, the local changes, the unpushed
+show `–` (no upstream, detached HEAD). A **Version** card is added when a tag is reachable from
+`HEAD`, a **Stashes** card when there is at least one stash (see [Version and stashes](#version-and-stashes)),
+a **Conflicts** card when files have unresolved merge conflicts, and a banner appears above the cards
+while an operation is in progress. Below come the commit graph, the local changes, the unpushed
 commits, and the list of git commands that were run.
 
 ## Commit graph
@@ -65,7 +69,8 @@ order, with one lane per line of history.
   no meaning, so every dot stays filled.
 - **Curves** between lanes show where a branch forked and where a merge brought it back. Merge commits
   are the ones where a second lane joins the main one.
-- Each row shows the short hash, subject, author and date. Dates are converted to the browser's
+- Each row shows the short hash, subject, author and date. Hashes of pushed commits and the upstream
+  badge are links to the remote (see [Links to the remote](#links-to-the-remote)). Dates are converted to the browser's
   timezone with a small inline script (the server-side date is the fallback without JavaScript).
 
 The graph uses `graph_commit_limit` (default 30) as the **total** number of commits for `HEAD` and
@@ -134,6 +139,75 @@ list contains only the local commit's changes.*
 excludes changes that only exist upstream, which a plain two-dot diff would wrongly show as yours
 (reversed). Consequence: the list is a net diff, so a file added and deleted inside the unpushed range
 does not appear, and a file changed in several commits appears once with the combined +/-.
+
+## Links to the remote
+
+When the remote is on a known host, the graph becomes clickable:
+
+| Where | Link |
+|---|---|
+| Hash of a **pushed** commit | The commit page |
+| Upstream badge (`origin/main`) | The branch page on the remote |
+| "Compare on GitHub" in *Unpushed commits* | HEAD against the upstream branch, only when **behind and not ahead** |
+| "GitHub" in the graph legend | The repository |
+
+| Provider | Detected from the host | Commit | Branch | Compare |
+|---|---|---|---|---|
+| GitHub | `github.com` | `/commit/<sha>` | `/tree/<branch>` | `/compare/<sha>...<branch>` |
+| GitLab | `gitlab.com`, or any host containing `gitlab` | `/-/commit/<sha>` | `/-/tree/<branch>` | `/-/compare/<sha>...<branch>` |
+| Bitbucket | `bitbucket.org` | `/commits/<sha>` | `/branch/<branch>` | none (no reliable pattern) |
+
+Any other host (Gitea, Azure DevOps, a self-hosted GitHub or Bitbucket Server, a local path…) gets no
+links: URLs are never guessed. Links open in a new tab with `rel="noopener noreferrer"`.
+
+**Which commits are linked, and why.** Only commits **known to be on the remote**. A commit of the graph is
+pushed when it is reachable from the upstream (the same notion as the hollow dots), so local-only commits
+stay plain text: their page would be a 404. For the same reason nothing is linked without an upstream, and
+"known" means *as of the last fetch*: a commit pushed from another machine and then force-pushed away is
+the one case where a link can still 404. The compare link starts from `HEAD`, which is an ancestor of the
+upstream when you are not ahead, hence exists on the remote. When you are ahead, the commits it would
+start from may not exist remotely, so there is no compare link.
+
+**How the remote is found.** One extra command, `git config --null --list`, read once per request:
+
+1. The remote is the `branch.<name>.remote` of the current branch (not split from `origin/main`, so remote
+   names containing slashes work). Without one (no upstream, detached HEAD) it is `origin`, if it exists.
+2. Its URL is `remote.<name>.url` (the first one when several are configured).
+3. The URL is turned into a web URL. Supported forms: `git@host:owner/repo.git`,
+   `ssh://git@host[:port]/owner/repo.git`, `https://[user[:password]@]host[:port]/owner/repo[.git]`
+   and `git://host/owner/repo.git`. Nested GitLab groups (`group/sub/repo`) work; GitHub and Bitbucket
+   need exactly `owner/repo`. The result is rebuilt from scheme, host and path only: **credentials
+   (`user:password@`, tokens) are never read into the profile**, the `.git` suffix and trailing slash are
+   dropped, and the ssh/git port is ignored (an `https` port is kept). ssh and git URLs become `https`.
+4. The branch of the upstream is the tracking ref without its remote prefix (`origin/feature/x` gives
+   `feature/x`); each path segment is URL-encoded, slashes are kept.
+
+`url.<base>.insteadOf` rewrites are not applied: a remote written as `gh:owner/repo` is not recognised.
+Everything is computed from local data, with no network access.
+
+## Version and stashes
+
+**Version** is `git describe --tags --abbrev=7 HEAD`: the nearest tag reachable from `HEAD`, annotated or
+not. `0.4.0` means `HEAD` is that tag; `0.4.0-3-g2897d71` means 3 commits after it, at commit `2897d71`.
+It is shown as a card and as a toolbar tooltip row.
+
+`git describe` fails when there is nothing to describe, which would put a red *Failed* row in the list of
+commands on every request of a tag-less repository (common for applications). So the bundle first checks
+the filesystem, without any process, in the common git directory: tags exist if `refs/tags/` holds at least
+one file (tag names may contain `/`), or if `packed-refs` has a `refs/tags/` line (read line by line, up
+to the first match). Only when it is certain there is no tag is `git describe` skipped: no command, no
+card. Anything uncertain (reftable ref format, unreadable file) runs it anyway. A repository that has tags
+but none reachable from `HEAD` still makes it fail: the card is not shown, the cause is logged at debug
+level on the `git_profiler` channel and the command appears as *Failed*.
+
+**Stashes** shows how many entries `git stash list` would print, as a card and a tooltip row, only when
+there is at least one. It runs **no git process**: the stash list is the reflog of `refs/stash`, the file
+`logs/refs/stash` (one line per stash) of the *common* git directory. In a linked worktree the git
+directory is `.git/worktrees/<name>`, but stashes are shared by all the worktrees and live in the main
+`.git`: the common directory is read from the `commondir` file of the worktree's git directory
+(`git rev-parse --git-common-dir` is unreliable before git 2.13). This reuses the git directory already
+located for the operation detection. Repositories using the reftable ref format (git 2.45+, opt-in) have
+no such file: the count is 0 and no card is shown.
 
 ## Operations in progress and conflicts
 
@@ -246,14 +320,18 @@ The last section lists every git command run **for this request**, with its dura
 |---|---|---|
 | `git status --porcelain=v2 --branch -z --untracked-files=all` | Branch, upstream, ahead/behind, staged/unstaged/untracked | Always |
 | `git show -s --format=%h HEAD @{u} --` | Short hashes of `HEAD` and the upstream | Always (`@{u}` only with an upstream) |
-| `git rev-parse --git-dir` | Location of the git directory, to detect an operation in progress | Always, once per PHP process (so once per request under PHP-FPM) |
+| `git rev-parse --git-dir` | Location of the git directory, to detect an operation in progress and to count the stashes | Always, once per PHP process (so once per request under PHP-FPM) |
 | `git diff --cached --raw --numstat -z -M` | Staged files | Something is staged |
 | `git diff --raw --numstat -z -M` | Unstaged files | Something is unstaged |
 | `git log … @{u}..HEAD --` | Unpushed commits | Upstream and ahead > 0 |
 | `git diff --raw --numstat -z -M @{u}...HEAD --` | Files of the unpushed commits | Same |
 | `git log … --topo-order -n <limit> HEAD @{u} --` | Commit graph | Always |
+| `git config --null --list` | Remote of the branch and its URL, for the [links](#links-to-the-remote) | Always |
+| `git describe --tags --abbrev=7 HEAD` | [Version](#version-and-stashes) | The repository has a tag (checked on the filesystem, see below) |
 
-That is **4 to 8** commands. Every call is also prefixed with `-c log.showSignature=false -c
+Stashes are counted by reading a file, not by a command.
+
+That is **5 to 10** commands: 5 on a repository without tags, 6 with tags, up to 10 with staged, unstaged and unpushed work. Every call is also prefixed with `-c log.showSignature=false -c
 diff.relative=false` (to neutralise user config that would alter the output); those options are not
 shown in the table.
 
@@ -321,13 +399,13 @@ Safeguards on every git process:
 - Read-only commands only. No `fetch`, `pull`, `remote update` or `ls-remote`: **no network access**.
 - Linked worktrees and submodules (where `.git` is a file) are supported.
 
-**Cost.** 4 to 8 short-lived processes per profiled request, about 10 to 20 ms each on a normal
+**Cost.** 5 to 10 short-lived processes per profiled request, about 10 to 20 ms each on a normal
 repository; in the screenshots, 37 to 71 ms in total. Because this happens after the response, it adds
 no latency to the page itself. It does keep the PHP worker busy a little longer: with PHP-FPM
 (`fastcgi_finish_request`) the client is already released; with servers that do not flush before
 `kernel.terminate`, the response may be held until collection ends.
 
-**Worst case.** Each command is bounded by `timeout`, so the upper bound is `8 x timeout`, i.e. 40 s
+**Worst case.** Each command is bounded by `timeout`, so the upper bound is `10 x timeout`, i.e. 50 s
 with the default, if every command hangs (for example a stalled network file system). A hanging
 `status` or `show` aborts the collection immediately (the panel becomes "unavailable"), so in practice
 the bound is much lower. Lower `timeout` on slow mounts if you prefer to lose the panel over holding a
@@ -345,6 +423,8 @@ file paths in the profiler, and spawns processes: do not enable it in `prod`.
   another user ("dubious ownership"), which shows up as a failed `git status`.
 - **Project directory only.** It reads the repository containing `kernel.project_dir`, not other repos,
   vendor packages or submodule contents.
+- **Links need a known host and an upstream.** Unknown hosts, `insteadOf` rewrites and branches without
+  upstream have no links; see [Links to the remote](#links-to-the-remote).
 - **Snapshot per request.** Each profile stores the state at the time of that request.
 - **Graph is a window**, not the whole history: `graph_commit_limit` commits in total, topologically
   ordered; a long-lived upstream far ahead can push your own commits out of view.
@@ -353,4 +433,4 @@ file paths in the profiler, and spawns processes: do not enable it in `prod`.
   date.
 - **One operation at a time.** If several are in progress (for example a bisect during a rebase), only
   the first by precedence is shown. The sequencer's own todo list (a multi-commit cherry-pick) is not read.
-- **Not shown:** stashes, tags, other local branches, submodule status.
+- **Not shown:** the stashes themselves (only their number), tags other than the nearest one, other local branches, submodule status.

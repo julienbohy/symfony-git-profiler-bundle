@@ -9,23 +9,22 @@ use Psr\Log\LoggerInterface;
 use Psr\Log\NullLogger;
 
 /**
- * Detects the operation left in progress (rebase, merge...) from the files git keeps in its directory.
- *
- * The git directory is located with a single `git rev-parse --git-dir` (`--absolute-git-dir` needs git 2.13),
- * which also covers linked worktrees (`.git/worktrees/<name>`) and submodules. The resolved path is kept for
- * the lifetime of the process.
+ * Detects the operation left in progress (rebase, merge...) from the files git keeps in its directory
+ * (located by {@see GitDirectory}, shared with the other readers of that directory).
  */
 final class OperationDetector
 {
-    private ?string $gitDirectory = null;
+    private readonly GitDirectory $directory;
 
     private readonly LoggerInterface $logger;
 
     public function __construct(
-        private readonly GitCommandRunnerInterface $git,
-        private readonly string $workingDirectory,
+        GitCommandRunnerInterface $git,
+        string $workingDirectory,
         ?LoggerInterface $logger = null,
+        ?GitDirectory $gitDirectory = null,
     ) {
+        $this->directory = $gitDirectory ?? new GitDirectory($git, $workingDirectory);
         $this->logger = $logger ?? new NullLogger();
     }
 
@@ -35,34 +34,12 @@ final class OperationDetector
     public function detect(): ?Operation
     {
         try {
-            return $this->detectIn($this->gitDirectory());
+            return $this->detectIn($this->directory->path());
         } catch (\Throwable $e) {
             $this->logger->debug('Git operation state unavailable: {message}', ['message' => $e->getMessage(), 'exception' => $e]);
 
             return null;
         }
-    }
-
-    private function gitDirectory(): string
-    {
-        if ($this->gitDirectory !== null) {
-            return $this->gitDirectory;
-        }
-
-        $path = trim($this->git->run(['rev-parse', '--git-dir']));
-        if ($path === '') {
-            throw new \UnexpectedValueException('git rev-parse --git-dir returned nothing.');
-        }
-
-        // Relative to the working directory of the git process (".git" at the root of a repository).
-        $isAbsolute = str_starts_with($path, '/') || preg_match('#^[A-Za-z]:[\\\\/]#', $path) === 1;
-        $directory = $isAbsolute ? $path : rtrim($this->workingDirectory, '/\\') . '/' . $path;
-
-        if (!is_dir($directory)) {
-            throw new \UnexpectedValueException(\sprintf('Git directory "%s" does not exist.', $directory));
-        }
-
-        return $this->gitDirectory = $directory;
     }
 
     private function detectIn(string $gitDirectory): ?Operation

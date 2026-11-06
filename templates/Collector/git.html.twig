@@ -54,6 +54,12 @@
                 <b>Commit</b>
                 <span>{{ collector.shortCommit }}</span>
             </div>
+            {% if collector.describe %}
+                <div class="sf-toolbar-info-piece">
+                    <b>Version</b>
+                    <span>{{ collector.describe }}</span>
+                </div>
+            {% endif %}
             <div class="sf-toolbar-info-piece">
                 <b>Modified files</b>
                 <span>{{ collector.changedFilesCount }}</span>
@@ -66,6 +72,12 @@
                 <div class="sf-toolbar-info-piece">
                     <b>Behind upstream</b>
                     <span>{{ collector.behindCommitsCount }}</span>
+                </div>
+            {% endif %}
+            {% if collector.stashCount > 0 %}
+                <div class="sf-toolbar-info-piece">
+                    <b>Stashes</b>
+                    <span>{{ collector.stashCount }}</span>
                 </div>
             {% endif %}
         {% endset %}
@@ -138,6 +150,12 @@
                 <span class="value"><code>{{ collector.shortCommit }}</code></span>
                 <span class="label">Short commit</span>
             </div>
+            {% if collector.describe %}
+                <div class="metric">
+                    <span class="value"><code>{{ collector.describe }}</code></span>
+                    <span class="label">Version</span>
+                </div>
+            {% endif %}
             <div class="metric">
                 <span class="value">{{ collector.changedFilesCount }}</span>
                 <span class="label">Modified files</span>
@@ -156,6 +174,12 @@
                 <span class="value">{{ collector.hasUpstream ? collector.behindCommitsCount : '–' }}</span>
                 <span class="label">Behind upstream</span>
             </div>
+            {% if collector.stashCount > 0 %}
+                <div class="metric">
+                    <span class="value">{{ collector.stashCount }}</span>
+                    <span class="label">Stashes</span>
+                </div>
+            {% endif %}
         </div>
 
         {% if collector.graphRows is not empty %}
@@ -174,12 +198,14 @@
                 .git-badge { display: inline-block; padding: 0 6px; border-radius: 9px; font-size: 11px; line-height: 16px; margin-left: 6px; color: #fff; }
                 .git-badge-head { background: #de4c36; }
                 .git-badge-upstream { background: #4e79a7; }
+                .git-badge a { color: inherit; text-decoration: underline; }
             </style>
 
             <h3>Commit graph</h3>
             <p class="text-muted">
                 Recent commits of <code>HEAD</code>{% if collector.hasUpstream %} and its upstream <code>{{ collector.upstreamRef }}</code>{% endif %}.
                 {% if collector.hasUpstream %}Hollow dots are commits not pushed to the upstream yet.{% endif %}
+                {% if collector.remote %}Pushed commits link to <a href="{{ collector.remote.url }}" target="_blank" rel="noopener noreferrer">{{ collector.remote.provider }}</a>.{% endif %}
             </p>
 
             {# One 28px-high SVG per row: lane lines in the cell, commit details beside. #}
@@ -212,12 +238,13 @@
                             {# Hollow only when "not pushed" is meaningful — without an upstream every dot stays filled. #}
                             <circle cx="{{ dotX }}" cy="{{ centerY }}" r="4" stroke="{{ dotColor }}" stroke-width="2" fill="{{ collector.hasUpstream and not row.isPushed ? 'var(--base-0, #fff)' : dotColor }}"/>
                         </svg>
-                        <span class="git-graph-hash"><code>{{ row.shortHash }}</code></span>
+                        {# Only pushed commits have a URL: the others do not exist on the remote yet. #}
+                        <span class="git-graph-hash">{% if row.url ?? null %}<a href="{{ row.url }}" target="_blank" rel="noopener noreferrer"><code>{{ row.shortHash }}</code></a>{% else %}<code>{{ row.shortHash }}</code>{% endif %}</span>
                         <span class="git-graph-subject">
                             {{ row.subject }}
                             {# On a detached checkout the branch name is the literal "HEAD". #}
                             {% if row.isHead %}<span class="git-badge git-badge-head">{{ collector.detached ? 'HEAD' : 'HEAD → ' ~ collector.branch }}</span>{% endif %}
-                            {% if row.isUpstream %}<span class="git-badge git-badge-upstream">{{ collector.upstreamRef }}</span>{% endif %}
+                            {% if row.isUpstream %}<span class="git-badge git-badge-upstream">{% if collector.upstreamUrl %}<a href="{{ collector.upstreamUrl }}" target="_blank" rel="noopener noreferrer">{{ collector.upstreamRef }}</a>{% else %}{{ collector.upstreamRef }}{% endif %}</span>{% endif %}
                         </span>
                         <span class="git-graph-author text-muted">{{ row.author }}</span>
                         <span class="git-graph-date text-muted">{{ _self.commitTime(row.date) }}</span>
@@ -272,7 +299,7 @@
         {% elseif collector.unpushedCommits is empty %}
             <div class="empty">
                 {% if behind > 0 %}
-                    <p>Nothing to push. <code>{{ collector.upstreamRef }}</code> has {{ behind }} commit{{ behind > 1 ? 's' }} you don't have yet (as of the last fetch).</p>
+                    <p>Nothing to push. <code>{{ collector.upstreamRef }}</code> has {{ behind }} commit{{ behind > 1 ? 's' }} you don't have yet (as of the last fetch).{% if collector.compareUrl %} <a href="{{ collector.compareUrl }}" target="_blank" rel="noopener noreferrer">Compare on {{ collector.remote.provider }}</a>{% endif %}</p>
                 {% else %}
                     <p>Up to date with upstream — nothing to push.</p>
                 {% endif %}

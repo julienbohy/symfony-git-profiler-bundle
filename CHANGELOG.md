@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Links to the remote: in the commit graph, the hashes of pushed commits link to their page on
+  GitHub, GitLab or Bitbucket (self-hosted GitLab hosts are recognised by a `gitlab` in their name), and
+  the upstream badge links to the remote branch. Commits that are not pushed yet are not linked, as they
+  would be a 404. When the branch is behind and not ahead, a "Compare on GitHub/GitLab" link is added
+  to the "Unpushed commits" section. The remote is the `branch.<name>.remote` of the current branch
+  (`origin` without upstream) and its URL is normalised (ssh, scp-like, https, git; credentials are
+  never displayed); unknown hosts get no links. It costs one extra `git config --null --list` command.
+- "Version" card and toolbar tooltip row: `git describe --tags` of `HEAD`, e.g. `0.4.0` or
+  `0.4.0-3-g2897d71`, shown when a tag is reachable. It costs one extra `git describe` command, which
+  is skipped (after a filesystem check, no process) when the repository has no tag at all.
+- "Stashes" card and toolbar tooltip row: the number of stashes, shown when there is at least one. It is
+  counted from the reflog file of `refs/stash` in the common git directory (shared by linked worktrees),
+  without any extra git process.
+
 ## [0.4.0] - 2026-11-06
 
 ### Added

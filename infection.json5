@@ -1,7 +1,7 @@
 {
     "$schema": "vendor/infection/infection/resources/schema.json",
     "source": {
-        "directories": ["src/Git/Parser"]
+        "directories": ["src/Git/Parser", "src/Git/Remote"]
     },
     "phpUnit": {
         "configDir": "."

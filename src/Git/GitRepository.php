@@ -6,9 +6,12 @@ namespace JulienBohy\GitProfilerBundle\Git;
 
 use JulienBohy\GitProfilerBundle\Git\Command\GitCommandRunnerInterface;
 use JulienBohy\GitProfilerBundle\Git\Parser\DiffParser;
+use JulienBohy\GitProfilerBundle\Git\Parser\GitConfigParser;
 use JulienBohy\GitProfilerBundle\Git\Parser\LogParser;
 use JulienBohy\GitProfilerBundle\Git\Parser\StatusParser;
 use JulienBohy\GitProfilerBundle\Git\Parser\StatusSnapshot;
+use JulienBohy\GitProfilerBundle\Git\Remote\RemoteRepository;
+use JulienBohy\GitProfilerBundle\Git\Remote\RemoteUrlParser;
 use Psr\Log\LoggerInterface;
 use Psr\Log\NullLogger;
 
@@ -32,6 +35,10 @@ final readonly class GitRepository implements GitRepositoryInterface
         private int $graphCommitLimit = self::DEFAULT_GRAPH_COMMIT_LIMIT,
         ?LoggerInterface $logger = null,
         private ?OperationDetector $operationDetector = null,
+        private GitConfigParser $configParser = new GitConfigParser(),
+        private RemoteUrlParser $remoteUrlParser = new RemoteUrlParser(),
+        private ?StashCounter $stashCounter = null,
+        private ?TagPresence $tagPresence = null,
     ) {
         $this->logger = $logger ?? new NullLogger();
     }
@@ -69,6 +76,8 @@ final readonly class GitRepository implements GitRepositoryInterface
 
         [$hasUpstream, $unpushedCommits, $unpushedFiles, $unpushedHashes] = $this->unpushed($status, $hasUpstream);
 
+        [$remote, $upstreamBranch] = $this->remote($status->branch, $hasUpstream ? $status->upstream : null);
+
         $graphCommits = $this->graphCommits($status->oid, $hasUpstream, $upstreamShortHash, $unpushedHashes);
 
         return new GitInfo(
@@ -83,6 +92,11 @@ final readonly class GitRepository implements GitRepositoryInterface
             $hasUpstream ? $status->upstream : null,
             $hasUpstream ? $status->behind : 0,
             $this->operationDetector?->detect(),
+            $remote,
+            $upstreamBranch,
+            $status->oid,
+            $this->describe(),
+            $this->stashCount(),
         );
     }
 
@@ -171,6 +185,57 @@ final readonly class GitRepository implements GitRepositoryInterface
             $this->logDegraded('commit graph', $e);
 
             return [];
+        }
+    }
+
+    /**
+     * The web repository of the remote of the branch (its `origin` without one) and the name of the upstream
+     * branch on that remote. One `git config` process; nothing is linked when the remote or its host is unknown.
+     *
+     * @return array{0: ?RemoteRepository, 1: ?string}
+     */
+    private function remote(string $branch, ?string $upstream): array
+    {
+        try {
+            $configured = $this->configParser->remote($this->git->run(['config', '--null', '--list']), $branch);
+            $repository = $configured !== null ? $this->remoteUrlParser->parse($configured->url) : null;
+
+            if ($configured === null || $repository === null) {
+                return [null, null];
+            }
+
+            return [$repository, $upstream !== null ? $configured->branchOf($upstream) : null];
+        } catch (\Throwable $e) {
+            $this->logDegraded('remote', $e);
+
+            return [null, null];
+        }
+    }
+
+    private function describe(): ?string
+    {
+        // `git describe` fails without any tag: do not run it when it is certain there is none.
+        if ($this->tagPresence !== null && !$this->tagPresence->mightHaveTags()) {
+            return null;
+        }
+
+        try {
+            return $this->lines($this->git->run(['describe', '--tags', '--abbrev=7', 'HEAD']))[0] ?? null;
+        } catch (\Throwable $e) {
+            $this->logDegraded('version', $e); // no tag reachable from HEAD ("No names found" or "cannot describe anything")
+
+            return null;
+        }
+    }
+
+    private function stashCount(): int
+    {
+        try {
+            return $this->stashCounter?->count() ?? 0;
+        } catch (\Throwable $e) {
+            $this->logDegraded('stashes', $e);
+
+            return 0;
         }
     }
 

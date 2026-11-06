@@ -12,6 +12,7 @@ For installation, see the [README](../README.md).
 - [Commit graph](#commit-graph)
 - [Local changes](#local-changes)
 - [Ahead, behind, diverged](#ahead-behind-diverged)
+- [Operations in progress and conflicts](#operations-in-progress-and-conflicts)
 - [Edge cases](#edge-cases)
 - [Git commands](#git-commands)
 - [Configuration](#configuration)
@@ -34,7 +35,9 @@ The segment shows the branch name followed by counters:
 | ↑ | Commits not pushed yet (`@{u}..HEAD`). Shows `–` when there is no upstream. |
 | ↓ | Commits on the upstream that you do not have, **as of the last fetch**. Only displayed when greater than 0. |
 
-Hovering opens the detail block: branch, short commit, and the same three numbers.
+Hovering opens the detail block: branch, short commit, and the same three numbers. While an
+operation is in progress the segment turns yellow (red with conflicts) and shows its label, e.g.
+`rebasing 3/7` (see [Operations in progress and conflicts](#operations-in-progress-and-conflicts)).
 
 The toolbar is a quick "am I about to test the right code?" check: wrong branch, forgotten local
 edits, or a branch that is behind are visible on every page you open. The **Git** entry of the profiler
@@ -48,7 +51,8 @@ menu carries a `files / unpushed` badge when either number is non-zero.
 
 The panel opens with five cards: **Branch** (or **Detached HEAD**), **Short commit**, **Modified
 files**, **Unpushed commits** and **Behind upstream**. Cards without a meaning in the current state
-show `–` (no upstream, detached HEAD). Below come the commit graph, the local changes, the unpushed
+show `–` (no upstream, detached HEAD). A **Conflicts** card is added when files have unresolved
+merge conflicts, and a banner appears above the cards while an operation is in progress. Below come the commit graph, the local changes, the unpushed
 commits, and the list of git commands that were run.
 
 ## Commit graph
@@ -131,6 +135,70 @@ excludes changes that only exist upstream, which a plain two-dot diff would wron
 (reversed). Consequence: the list is a net diff, so a file added and deleted inside the unpushed range
 does not appear, and a file changed in several commits appears once with the combined +/-.
 
+## Operations in progress and conflicts
+
+A merge, rebase or cherry-pick that stopped halfway leaves the repository in a state that is easy to
+forget, and that explains why the working tree "looks odd". The panel says so.
+
+
+**Banner.** While an operation is in progress, a banner above the summary cards names it, with the
+commands that continue or abort it. It is yellow, and red when files have conflicts (the number of
+conflicts is part of the banner):
+
+| Operation | Banner | Hint |
+|---|---|---|
+| Rebase | Rebasing `feature/x` onto `1a2b3c4` — step 3/7 | `git rebase --continue` · `git rebase --abort` |
+| Merge | Merging `Merge branch 'other'` (first line of `MERGE_MSG`) | `git commit` · `git merge --abort` |
+| `git am` | Applying patches (am) — 2/5 | `git am --continue` · `git am --skip` · `git am --abort` |
+| Cherry-pick | Cherry-picking `abc1234` | `git cherry-pick --continue` · `git cherry-pick --abort` |
+| Revert | Reverting `abc1234` | `git revert --continue` · `git revert --abort` |
+| Bisect | Bisect in progress | `git bisect reset` |
+
+**Toolbar.** The segment is yellow during an operation and red when there are conflicts, shows a
+label (`rebasing 3/7`, `merging`, `am 2/5`, `cherry-picking`, `reverting`, `bisecting`) and a `⚠ N`
+counter for the conflicts; the hover block gets an *Operation* and a *Conflicts* row.
+
+**Rebase and detached HEAD.** `HEAD` is detached while a rebase is stopped. Instead of "Detached HEAD",
+the first card (and the toolbar) read **Rebasing** with the branch being rebased. A rebase of a
+detached HEAD has no branch to show and stays "Detached HEAD".
+
+**Conflicts.** Unmerged paths come from the `u` records of `git status --porcelain=v2`. They are listed
+first in *Locally modified files*, with the status `Conflict — <kind>`, the stage *Unmerged* and no
++/- counts:
+
+| Kind | Status code | Meaning |
+|---|---|---|
+| both modified | `UU` | Changed on both sides |
+| both added | `AA` | Added on both sides |
+| both deleted | `DD` | Deleted on both sides |
+| added by us / by them | `AU` / `UA` | Added on one side only |
+| deleted by us / by them | `DU` / `UD` | Deleted on one side, changed on the other |
+
+`git diff` also reports unmerged paths (as `U`, and as an extra `M` for the unstaged one), so they are
+removed from the staged and unstaged diffs to appear once. When conflicts are the only changes, the two
+diff commands are not run at all.
+
+**How an operation is detected.** The bundle runs one extra command, `git rev-parse --git-dir`, to find
+the git directory (`--absolute-git-dir` needs git 2.13; a relative result is resolved against the
+project directory). It works for a normal repository, a linked worktree (`.git/worktrees/<name>`) and a
+submodule. The path is then kept for the lifetime of the PHP process, and the files below are read
+directly. The first match wins, in this order:
+
+| Operation | Detected from |
+|---|---|
+| Rebase | `rebase-merge/` (`msgnum`, `end`, `head-name`, `onto`), or `rebase-apply/` without an `applying` file (`next`, `last`, `head-name`, `onto`) |
+| `git am` | `rebase-apply/applying` (`next`, `last`) |
+| Merge | `MERGE_HEAD`, and the first line of `MERGE_MSG` |
+| Cherry-pick | `CHERRY_PICK_HEAD` |
+| Revert | `REVERT_HEAD` |
+| Bisect | `BISECT_LOG` |
+
+`rebase-merge/` is used by interactive rebases and, since git 2.26, by every rebase; `rebase-apply/` by
+older non-interactive rebases and by `git am`. Both layouts are handled. Full object ids are shortened
+to 7 characters. If the git directory cannot be found or read, there is simply no operation (logged at
+debug level on the `git_profiler` channel); the rest of the panel is not affected. Only one operation
+is reported, so a bisect run during a rebase shows the rebase.
+
 ## Edge cases
 
 ### Detached HEAD
@@ -141,7 +209,8 @@ does not appear, and a file changed in several commits appears once with the com
 
 The toolbar and the first card read `detached`, the badge on the graph is a bare `HEAD`, and the short
 commit is still displayed. The graph shows `HEAD` only. Common after checking out a tag or a commit,
-or in CI-like and rebase/bisect situations.
+or in CI-like and rebase/bisect situations. During a rebase the card reads "Rebasing" instead (see
+[Operations in progress and conflicts](#operations-in-progress-and-conflicts)).
 
 ### No upstream
 
@@ -177,13 +246,14 @@ The last section lists every git command run **for this request**, with its dura
 |---|---|---|
 | `git status --porcelain=v2 --branch -z --untracked-files=all` | Branch, upstream, ahead/behind, staged/unstaged/untracked | Always |
 | `git show -s --format=%h HEAD @{u} --` | Short hashes of `HEAD` and the upstream | Always (`@{u}` only with an upstream) |
+| `git rev-parse --git-dir` | Location of the git directory, to detect an operation in progress | Always, once per PHP process (so once per request under PHP-FPM) |
 | `git diff --cached --raw --numstat -z -M` | Staged files | Something is staged |
 | `git diff --raw --numstat -z -M` | Unstaged files | Something is unstaged |
 | `git log … @{u}..HEAD --` | Unpushed commits | Upstream and ahead > 0 |
 | `git diff --raw --numstat -z -M @{u}...HEAD --` | Files of the unpushed commits | Same |
 | `git log … --topo-order -n <limit> HEAD @{u} --` | Commit graph | Always |
 
-That is **3 to 7** commands. Every call is also prefixed with `-c log.showSignature=false -c
+That is **4 to 8** commands. Every call is also prefixed with `-c log.showSignature=false -c
 diff.relative=false` (to neutralise user config that would alter the output); those options are not
 shown in the table.
 
@@ -251,13 +321,13 @@ Safeguards on every git process:
 - Read-only commands only. No `fetch`, `pull`, `remote update` or `ls-remote`: **no network access**.
 - Linked worktrees and submodules (where `.git` is a file) are supported.
 
-**Cost.** 3 to 7 short-lived processes per profiled request, about 10 to 20 ms each on a normal
+**Cost.** 4 to 8 short-lived processes per profiled request, about 10 to 20 ms each on a normal
 repository; in the screenshots, 37 to 71 ms in total. Because this happens after the response, it adds
 no latency to the page itself. It does keep the PHP worker busy a little longer: with PHP-FPM
 (`fastcgi_finish_request`) the client is already released; with servers that do not flush before
 `kernel.terminate`, the response may be held until collection ends.
 
-**Worst case.** Each command is bounded by `timeout`, so the upper bound is `7 x timeout`, i.e. 35 s
+**Worst case.** Each command is bounded by `timeout`, so the upper bound is `8 x timeout`, i.e. 40 s
 with the default, if every command hangs (for example a stalled network file system). A hanging
 `status` or `show` aborts the collection immediately (the panel becomes "unavailable"), so in practice
 the bound is much lower. Lower `timeout` on slow mounts if you prefer to lose the panel over holding a
@@ -281,4 +351,6 @@ file paths in the profiler, and spawns processes: do not enable it in `prod`.
 - **Unpushed files are a net diff** from the merge base (see above), not a per-commit breakdown.
 - **Dates** use the browser timezone through JavaScript; the commit time itself comes from git's author
   date.
-- **Not shown:** stashes, tags, other local branches, rebase/merge-in-progress state, submodule status.
+- **One operation at a time.** If several are in progress (for example a bisect during a rebase), only
+  the first by precedence is shown. The sequencer's own todo list (a multi-commit cherry-pick) is not read.
+- **Not shown:** stashes, tags, other local branches, submodule status.

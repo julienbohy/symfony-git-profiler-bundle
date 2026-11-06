@@ -7,7 +7,10 @@ namespace JulienBohy\GitProfilerBundle\DataCollector;
 use JulienBohy\GitProfilerBundle\Git\ChangedFile;
 use JulienBohy\GitProfilerBundle\Git\Command\GitCommandTrace;
 use JulienBohy\GitProfilerBundle\Git\Command\TraceableGitCommandRunner;
+use JulienBohy\GitProfilerBundle\Git\FileStatus;
 use JulienBohy\GitProfilerBundle\Git\GitRepositoryInterface;
+use JulienBohy\GitProfilerBundle\Git\Operation;
+use JulienBohy\GitProfilerBundle\Git\OperationKind;
 use JulienBohy\GitProfilerBundle\Git\UnpushedCommit;
 use JulienBohy\GitProfilerBundle\Graph\CommitGraph;
 use JulienBohy\GitProfilerBundle\Graph\CommitGraphLayout;
@@ -20,19 +23,22 @@ use Symfony\Component\HttpKernel\DataCollector\LateDataCollectorInterface;
 use Symfony\Component\VarDumper\Cloner\Data;
 
 /**
+ * @phpstan-type CollectedOperation array{kind: string, label: string, shortLabel: string, step: ?int, total: ?int, headName: ?string, onto: ?string, target: ?string, hints: list<string>}
+ * @phpstan-type CollectedFile array{path: string, status: string, statusLabel: string, stage: string, stageLabel: string, oldPath: ?string, additions: int, deletions: int, conflict: ?string}
  * @phpstan-type CollectedData array{
  *     available?: bool,
  *     branch?: ?string,
  *     shortCommit?: ?string,
  *     dirty?: bool,
- *     workingFiles?: list<array{path: string, status: string, statusLabel: string, stage: string, stageLabel: string, oldPath: ?string, additions: int, deletions: int}>,
+ *     workingFiles?: list<CollectedFile>,
  *     hasUpstream?: bool,
  *     unpushedCommits?: list<array{shortHash: string, subject: string, author: string, date: string}>,
- *     unpushedFiles?: list<array{path: string, status: string, statusLabel: string, stage: string, stageLabel: string, oldPath: ?string, additions: int, deletions: int}>,
+ *     unpushedFiles?: list<CollectedFile>,
  *     graphRows?: list<array{shortHash: string, subject: string, author: string, date: string, lane: int, incomingLanes: list<int>, segments: list<array{from: int, to: int}>, isHead: bool, isUpstream: bool, isPushed: bool}>,
  *     graphLaneCount?: int,
  *     upstreamRef?: ?string,
  *     behindCount?: int,
+ *     operation?: ?CollectedOperation,
  *     commands?: list<array{command: string, durationMs: float, successful: bool, error: ?string}>,
  * }
  */
@@ -74,6 +80,7 @@ final class GitDataCollector extends AbstractDataCollector implements LateDataCo
             'graphLaneCount' => $graph->laneCount,
             'upstreamRef' => $info?->upstreamRef,
             'behindCount' => $info->behindCount ?? 0,
+            'operation' => $info?->operation !== null ? $this->flattenOperation($info->operation) : null,
             'commands' => array_map($this->flattenTrace(...), \array_slice($this->tracer?->getTraces() ?? [], $from)),
         ];
     }
@@ -140,7 +147,7 @@ final class GitDataCollector extends AbstractDataCollector implements LateDataCo
     }
 
     /**
-     * @return list<array{path: string, status: string, statusLabel: string, stage: string, stageLabel: string, oldPath: ?string, additions: int, deletions: int}>
+     * @return list<CollectedFile>
      */
     public function getWorkingFiles(): array
     {
@@ -148,7 +155,7 @@ final class GitDataCollector extends AbstractDataCollector implements LateDataCo
     }
 
     /**
-     * @return list<array{path: string, status: string, statusLabel: string, stage: string, stageLabel: string, oldPath: ?string, additions: int, deletions: int}>
+     * @return list<CollectedFile>
      */
     public function getUnpushedFiles(): array
     {
@@ -200,6 +207,68 @@ final class GitDataCollector extends AbstractDataCollector implements LateDataCo
     }
 
     /**
+     * The operation in progress (merge, rebase, cherry-pick...), null when there is none.
+     *
+     * @return ?CollectedOperation
+     */
+    public function getOperation(): ?array
+    {
+        return $this->collected()['operation'] ?? null;
+    }
+
+    public function hasOperation(): bool
+    {
+        return $this->getOperation() !== null;
+    }
+
+    /**
+     * Number of files with an unresolved merge conflict.
+     */
+    public function getConflictsCount(): int
+    {
+        return \count(array_filter($this->getWorkingFiles(), static fn (array $file): bool => $file['status'] === FileStatus::Conflicted->value));
+    }
+
+    /**
+     * The branch being rebased: HEAD is detached during a rebase, this is the branch to display instead.
+     */
+    public function getRebasingBranch(): ?string
+    {
+        $operation = $this->getOperation();
+
+        return $operation !== null && $operation['kind'] === OperationKind::Rebase->value ? $operation['headName'] : null;
+    }
+
+    /**
+     * Toolbar block status: red with conflicts, yellow while an operation is in progress.
+     *
+     * @return 'normal'|'yellow'|'red'
+     */
+    public function getToolbarStatus(): string
+    {
+        return match (true) {
+            $this->getConflictsCount() > 0 => 'red',
+            $this->hasOperation() => 'yellow',
+            default => 'normal',
+        };
+    }
+
+    /**
+     * Short toolbar text of the operation in progress, e.g. "rebasing 3/7".
+     */
+    public function getOperationToolbarLabel(): ?string
+    {
+        $operation = $this->getOperation();
+        if ($operation === null) {
+            return null;
+        }
+
+        return $operation['step'] !== null && $operation['total'] !== null
+            ? \sprintf('%s %d/%d', $operation['shortLabel'], $operation['step'], $operation['total'])
+            : $operation['shortLabel'];
+    }
+
+    /**
      * @return list<array{command: string, durationMs: float, successful: bool, error: ?string}>
      */
     public function getCommands(): array
@@ -222,19 +291,38 @@ final class GitDataCollector extends AbstractDataCollector implements LateDataCo
     }
 
     /**
-     * @return array{path: string, status: string, statusLabel: string, stage: string, stageLabel: string, oldPath: ?string, additions: int, deletions: int}
+     * @return CollectedOperation
+     */
+    private function flattenOperation(Operation $operation): array
+    {
+        return [
+            'kind' => $operation->kind->value,
+            'label' => $operation->kind->label(),
+            'shortLabel' => $operation->kind->shortLabel(),
+            'step' => $operation->step,
+            'total' => $operation->total,
+            'headName' => $operation->headName,
+            'onto' => $operation->onto,
+            'target' => $operation->target,
+            'hints' => $operation->kind->hints(),
+        ];
+    }
+
+    /**
+     * @return CollectedFile
      */
     private function flattenFile(ChangedFile $file): array
     {
         return [
             'path' => $file->path,
             'status' => $file->status->value,
-            'statusLabel' => $file->status->label(),
+            'statusLabel' => $file->conflict !== null ? \sprintf('%s — %s', $file->status->label(), $file->conflict->label()) : $file->status->label(),
             'stage' => $file->stage->value,
             'stageLabel' => $file->stage->label(),
             'oldPath' => $file->oldPath,
             'additions' => $file->additions,
             'deletions' => $file->deletions,
+            'conflict' => $file->conflict?->value,
         ];
     }
 

@@ -13,6 +13,7 @@ enum FileStage: string
     case Unstaged = 'unstaged';
     case Untracked = 'untracked';
     case Committed = 'committed';
+    case Unmerged = 'unmerged';
 
     public function label(): string
     {
@@ -21,6 +22,7 @@ enum FileStage: string
             self::Unstaged => 'Unstaged',
             self::Untracked => 'Untracked',
             self::Committed => 'Committed',
+            self::Unmerged => 'Unmerged',
         };
     }
 }

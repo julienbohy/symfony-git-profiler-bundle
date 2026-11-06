@@ -4,6 +4,11 @@ declare(strict_types=1);
 
 namespace JulienBohy\GitProfilerBundle\Git\Parser;
 
+use JulienBohy\GitProfilerBundle\Git\ChangedFile;
+use JulienBohy\GitProfilerBundle\Git\ConflictKind;
+use JulienBohy\GitProfilerBundle\Git\FileStage;
+use JulienBohy\GitProfilerBundle\Git\FileStatus;
+
 /**
  * Parses `git status --porcelain=v2 --branch -z --untracked-files=all`.
  *
@@ -24,6 +29,7 @@ final class StatusParser
         $hasStaged = false;
         $hasUnstaged = false;
         $untracked = [];
+        $conflicts = [];
 
         $fields = explode("\0", $output);
         $count = \count($fields);
@@ -48,10 +54,10 @@ final class StatusParser
                         $upstream = $value;
                         break;
                     case 'branch.ab':
-                        if (preg_match('/^\+(\d+) -(\d+)$/', $value, $matches) === 1) {
+                        if (preg_match('/^\+(?<ahead>\d+) -(?<behind>\d+)$/', $value, $matches) === 1) {
                             $hasTracking = true;
-                            $ahead = (int) $matches[1];
-                            $behind = (int) $matches[2];
+                            $ahead = (int) $matches['ahead'];
+                            $behind = (int) $matches['behind'];
                         }
                         break;
                 }
@@ -69,8 +75,12 @@ final class StatusParser
                     }
                     break;
                 case 'u':
-                    $hasStaged = true;
-                    $hasUnstaged = true;
+                    // "u <XY> <sub> <m1> <m2> <m3> <mW> <h1> <h2> <h3> <path>": the path is the 11th field and may contain spaces.
+                    // Unmerged paths are reported on their own: the diffs are only run for the other changes.
+                    $parts = explode(' ', $record, 11);
+                    if (isset($parts[10])) {
+                        $conflicts[] = new ChangedFile($parts[10], FileStatus::Conflicted, FileStage::Unmerged, conflict: ConflictKind::tryFrom($parts[1]) ?? ConflictKind::BothModified);
+                    }
                     break;
                 case '?':
                     $untracked[] = substr($record, 2);
@@ -81,6 +91,6 @@ final class StatusParser
             }
         }
 
-        return new StatusSnapshot($oid, $branch, $upstream, $ahead, $behind, $hasTracking, $hasStaged, $hasUnstaged, $untracked);
+        return new StatusSnapshot($oid, $branch, $upstream, $ahead, $behind, $hasTracking, $hasStaged, $hasUnstaged, $untracked, $conflicts);
     }
 }

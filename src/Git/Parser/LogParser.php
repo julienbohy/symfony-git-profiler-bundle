@@ -53,7 +53,7 @@ final class LogParser
         $hashes = [];
 
         foreach ($this->lines($output) as $line) {
-            $hashes[explode(self::FIELD_SEPARATOR, $line, 2)[0]] = true;
+            $hashes[explode(self::FIELD_SEPARATOR, $line)[0]] = true;
         }
 
         return $hashes;
@@ -97,10 +97,10 @@ final class LogParser
     }
 
     /**
-     * @return list<string>
+     * @return array<int, string> non-empty lines (keys are not renumbered: callers only iterate)
      */
     private function lines(string $output): array
     {
-        return array_values(array_filter(explode("\n", trim($output)), static fn (string $line): bool => $line !== ''));
+        return array_filter(explode("\n", trim($output)), static fn (string $line): bool => $line !== '');
     }
 }

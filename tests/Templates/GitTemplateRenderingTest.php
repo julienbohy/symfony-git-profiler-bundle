@@ -6,11 +6,17 @@ namespace JulienBohy\GitProfilerBundle\Tests\Templates;
 
 use JulienBohy\GitProfilerBundle\DataCollector\GitDataCollector;
 use JulienBohy\GitProfilerBundle\Exception\GitCommandFailedException;
+use JulienBohy\GitProfilerBundle\Git\ChangedFile;
 use JulienBohy\GitProfilerBundle\Git\Command\GitCommandRunnerInterface;
 use JulienBohy\GitProfilerBundle\Git\Command\TraceableGitCommandRunner;
+use JulienBohy\GitProfilerBundle\Git\ConflictKind;
+use JulienBohy\GitProfilerBundle\Git\FileStage;
+use JulienBohy\GitProfilerBundle\Git\FileStatus;
 use JulienBohy\GitProfilerBundle\Git\GitInfo;
 use JulienBohy\GitProfilerBundle\Git\GitRepositoryInterface;
 use JulienBohy\GitProfilerBundle\Git\GraphCommit;
+use JulienBohy\GitProfilerBundle\Git\Operation;
+use JulienBohy\GitProfilerBundle\Git\OperationKind;
 use JulienBohy\GitProfilerBundle\Git\UnpushedCommit;
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
@@ -258,6 +264,155 @@ final class GitTemplateRenderingTest extends TestCase
         self::assertStringContainsString('simulated failure', $html);
     }
 
+    public function testNoBannerAndANormalToolbarWithoutOperation(): void
+    {
+        $html = $this->render(new GitInfo('main', 'abc1234', false));
+
+        self::assertStringNotContainsString('git-operation', $html);
+        self::assertStringNotContainsString('Conflicts', $html);
+        self::assertStringContainsString('sf-toolbar-status-normal', $html);
+    }
+
+    #[DataProvider('banners')]
+    public function testOperationBanner(Operation $operation, string $banner, string $hints): void
+    {
+        $html = $this->render(new GitInfo('main', 'abc1234', false, operation: $operation));
+
+        self::assertStringContainsString('class="git-operation status-warning"', $html);
+        self::assertMatchesRegularExpression('#<b>' . preg_quote($banner, '#') . '</b>#', $html);
+        self::assertStringContainsString($hints, $html);
+        self::assertStringNotContainsString('conflict', $html);
+        self::assertStringContainsString('sf-toolbar-status-yellow', $html);
+    }
+
+    /**
+     * @return iterable<string, array{Operation, string, string}>
+     */
+    public static function banners(): iterable
+    {
+        yield 'rebase' => [
+            new Operation(OperationKind::Rebase, 3, 7, 'feature/x', '1a2b3c4'),
+            'Rebasing <code>feature/x</code> onto <code>1a2b3c4</code> — step 3/7',
+            '<code>git rebase --continue</code> · <code>git rebase --abort</code>',
+        ];
+        yield 'rebase without details' => [new Operation(OperationKind::Rebase), 'Rebasing', '<code>git rebase --abort</code>'];
+        yield 'merge' => [
+            new Operation(OperationKind::Merge, target: "Merge branch 'other'"),
+            'Merging <code>Merge branch &#039;other&#039;</code>',
+            '<code>git commit</code> · <code>git merge --abort</code>',
+        ];
+        yield 'merge without message' => [new Operation(OperationKind::Merge), 'Merge in progress', '<code>git merge --abort</code>'];
+        yield 'am' => [
+            new Operation(OperationKind::ApplyMailbox, 2, 5),
+            'Applying patches (am) — 2/5',
+            '<code>git am --continue</code> · <code>git am --skip</code> · <code>git am --abort</code>',
+        ];
+        yield 'cherry-pick' => [
+            new Operation(OperationKind::CherryPick, target: 'abc1234'),
+            'Cherry-picking <code>abc1234</code>',
+            '<code>git cherry-pick --continue</code> · <code>git cherry-pick --abort</code>',
+        ];
+        yield 'revert' => [
+            new Operation(OperationKind::Revert, target: 'abc1234'),
+            'Reverting <code>abc1234</code>',
+            '<code>git revert --continue</code> · <code>git revert --abort</code>',
+        ];
+        yield 'bisect' => [new Operation(OperationKind::Bisect), 'Bisect in progress', '<code>git bisect reset</code>'];
+    }
+
+    public function testConflictsAreMentionedInTheBannerShownAsACardAndTurnTheToolbarRed(): void
+    {
+        $html = $this->render(new GitInfo(
+            'HEAD',
+            'abc1234',
+            true,
+            workingFiles: [
+                new ChangedFile('src/A.php', FileStatus::Conflicted, FileStage::Unmerged, conflict: ConflictKind::BothModified),
+                new ChangedFile('src/B.php', FileStatus::Conflicted, FileStage::Unmerged, conflict: ConflictKind::DeletedByUs),
+                new ChangedFile('src/C.php', FileStatus::Modified, FileStage::Unstaged, additions: 2, deletions: 1),
+            ],
+            operation: new Operation(OperationKind::Merge, target: 'feature'),
+        ));
+
+        self::assertStringContainsString('class="git-operation status-error"', $html);
+        self::assertMatchesRegularExpression('#<b>Merging <code>feature</code></b>\s*— 2 conflicts#', $html);
+        self::assertMatchesRegularExpression('#<span class="value">2</span>\s*<span class="label">Conflicts</span>#', $html);
+        self::assertStringContainsString('sf-toolbar-status-red', $html);
+        self::assertStringNotContainsString('sf-toolbar-status-yellow', $html);
+        // Toolbar: label of the operation, conflict counter and the matching tooltip rows.
+        self::assertStringContainsString('title="Operation in progress">merging</span>', $html);
+        self::assertStringContainsString('title="Files with conflicts">&#9888; 2</span>', $html);
+        self::assertMatchesRegularExpression('#<b>Operation</b>\s*<span>merging</span>#', $html);
+        self::assertMatchesRegularExpression('#<b>Conflicts</b>\s*<span>2</span>#', $html);
+    }
+
+    public function testASingleConflictIsNotPluralised(): void
+    {
+        $html = $this->render(new GitInfo(
+            'main',
+            'abc1234',
+            true,
+            workingFiles: [new ChangedFile('a.txt', FileStatus::Conflicted, FileStage::Unmerged, conflict: ConflictKind::BothAdded)],
+            operation: new Operation(OperationKind::CherryPick, target: 'abc1234'),
+        ));
+
+        self::assertMatchesRegularExpression('#— 1 conflict(?!s)#', $html);
+    }
+
+    public function testConflictedFilesAreListedWithTheirKindAndWithoutLineCounts(): void
+    {
+        $html = $this->render(new GitInfo(
+            'main',
+            'abc1234',
+            true,
+            workingFiles: [
+                new ChangedFile('a.txt', FileStatus::Conflicted, FileStage::Unmerged, conflict: ConflictKind::AddedByThem),
+                new ChangedFile('b.txt', FileStatus::Modified, FileStage::Unstaged, additions: 4, deletions: 2),
+            ],
+        ));
+
+        // A conflict without an operation (e.g. `git stash pop`) still turns the toolbar red.
+        self::assertStringNotContainsString('git-operation', $html);
+        self::assertStringContainsString('sf-toolbar-status-red', $html);
+        self::assertMatchesRegularExpression('#<code>a\.txt</code>.*?<td>Conflict — added by them</td>\s*<td>Unmerged</td>\s*<td></td>#s', $html);
+        self::assertMatchesRegularExpression('#<td>Modified</td>\s*<td>Unstaged</td>\s*<td><span class="text-muted">\+4 −2</span></td>#', $html);
+        self::assertLessThan(strpos($html, 'b.txt') ?: \PHP_INT_MAX, strpos($html, 'a.txt'));
+    }
+
+    public function testRebasingShowsTheBranchBeingRebasedInsteadOfDetached(): void
+    {
+        $html = $this->render(new GitInfo('HEAD', 'abc1234', false, operation: new Operation(OperationKind::Rebase, 3, 7, 'feature/x', '1a2b3c4')));
+
+        self::assertStringContainsString('<span class="label">Rebasing</span>', $html);
+        self::assertStringContainsString('<span class="value">feature/x</span>', $html);
+        self::assertStringContainsString('<b>Rebasing</b>', $html);
+        self::assertStringContainsString('title="Rebasing feature/x">feature/x</span>', $html);
+        self::assertStringContainsString('title="Operation in progress">rebasing 3/7</span>', $html);
+        self::assertStringNotContainsString('Detached HEAD at', $html);
+        self::assertStringNotContainsString('<span class="value">detached</span>', $html);
+        self::assertStringNotContainsString('<span class="label">Detached HEAD</span>', $html);
+        // The branch has an upstream: say it comes back after the rebase, not that there is none.
+        self::assertStringContainsString('is compared with its upstream again once the rebase is finished', $html);
+        self::assertStringContainsString('<span>after the rebase</span>', $html);
+        self::assertStringNotContainsString('no branch, so no upstream', $html);
+    }
+
+    public function testDetachedRebaseWithoutBranchNameStaysDetached(): void
+    {
+        $html = $this->render(new GitInfo('HEAD', 'abc1234', false, operation: new Operation(OperationKind::Rebase, 1, 2)));
+
+        self::assertStringContainsString('<span class="label">Detached HEAD</span>', $html);
+        self::assertStringContainsString('<span class="value">detached</span>', $html);
+    }
+
+    public function testNotRebasingKeepsTheBranchCardDuringAMerge(): void
+    {
+        $html = $this->render(new GitInfo('main', 'abc1234', false, operation: new Operation(OperationKind::Merge, target: 'other')));
+
+        self::assertStringContainsString('<span class="label">Branch</span>', $html);
+        self::assertStringContainsString('<span class="value">main</span>', $html);
+    }
+
     private function render(GitInfo $info, ?TraceableGitCommandRunner $tracer = null, ?\Closure $readGit = null): string
     {
         $repository = $this->createStub(GitRepositoryInterface::class);
@@ -276,7 +431,7 @@ final class GitTemplateRenderingTest extends TestCase
 
         $layoutStub = new ArrayLoader([
             '@WebProfiler/Profiler/layout.html.twig' => '{% block toolbar %}{% endblock %}{% block menu %}{% endblock %}{% block panel %}{% endblock %}',
-            '@WebProfiler/Profiler/toolbar_item.html.twig' => '{{ icon }}{{ text }}',
+            '@WebProfiler/Profiler/toolbar_item.html.twig' => '<div class="sf-toolbar-block sf-toolbar-status-{{ status|default(\'normal\') }}">{{ icon }}{{ text }}</div>',
         ]);
 
         $twig = new Environment(new ChainLoader([$layoutStub, $bundleLoader]));

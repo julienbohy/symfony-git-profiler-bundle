@@ -12,13 +12,21 @@
 
 {% block toolbar %}
     {% if collector.available %}
+        {# HEAD is detached during a rebase: show the branch being rebased instead. #}
+        {% set rebasingBranch = collector.rebasingBranch %}
         {% set icon %}
             <svg viewBox="0 0 256 256" xmlns="http://www.w3.org/2000/svg" preserveAspectRatio="xMinYMin meet" fill="#000000"><g id="SVGRepo_bgCarrier" stroke-width="0"></g><g id="SVGRepo_tracerCarrier" stroke-linecap="round" stroke-linejoin="round"></g><g id="SVGRepo_iconCarrier"><path d="M251.172 116.594L139.4 4.828c-6.433-6.437-16.873-6.437-23.314 0l-23.21 23.21 29.443 29.443c6.842-2.312 14.688-.761 20.142 4.693 5.48 5.489 7.02 13.402 4.652 20.266l28.375 28.376c6.865-2.365 14.786-.835 20.269 4.657 7.663 7.66 7.663 20.075 0 27.74-7.665 7.666-20.08 7.666-27.749 0-5.764-5.77-7.188-14.235-4.27-21.336l-26.462-26.462-.003 69.637a19.82 19.82 0 0 1 5.188 3.71c7.663 7.66 7.663 20.076 0 27.747-7.665 7.662-20.086 7.662-27.74 0-7.663-7.671-7.663-20.086 0-27.746a19.654 19.654 0 0 1 6.421-4.281V94.196a19.378 19.378 0 0 1-6.421-4.281c-5.806-5.798-7.202-14.317-4.227-21.446L81.47 39.442l-76.64 76.635c-6.44 6.443-6.44 16.884 0 23.322l111.774 111.768c6.435 6.438 16.873 6.438 23.316 0l111.251-111.249c6.438-6.44 6.438-16.887 0-23.324" fill="#DE4C36"></path></g></svg>
-            <span class="sf-toolbar-value"{% if collector.detached %} title="Detached HEAD at {{ collector.shortCommit }}"{% endif %}>{{ collector.detached ? 'detached' : collector.branch }}</span>
+            <span class="sf-toolbar-value"{% if rebasingBranch %} title="Rebasing {{ rebasingBranch }}"{% elseif collector.detached %} title="Detached HEAD at {{ collector.shortCommit }}"{% endif %}>{{ rebasingBranch ?? (collector.detached ? 'detached' : collector.branch) }}</span>
             <span class="sf-toolbar-value git-toolbar-counter" title="Locally modified files">&#9998; {{ collector.changedFilesCount }}</span>
             <span class="sf-toolbar-value git-toolbar-counter" title="Unpushed commits">&#8593; {{ collector.hasUpstream ? collector.unpushedCommitsCount : '–' }}</span>
             {% if collector.hasUpstream and collector.behindCommitsCount > 0 %}
                 <span class="sf-toolbar-value git-toolbar-counter" title="Commits behind {{ collector.upstreamRef }} (since the last fetch)">&#8595; {{ collector.behindCommitsCount }}</span>
+            {% endif %}
+            {% if collector.operation %}
+                <span class="sf-toolbar-value git-toolbar-counter" title="Operation in progress">{{ collector.operationToolbarLabel }}</span>
+            {% endif %}
+            {% if collector.conflictsCount > 0 %}
+                <span class="sf-toolbar-value git-toolbar-counter" title="Files with conflicts">&#9888; {{ collector.conflictsCount }}</span>
             {% endif %}
             {# The toolbar only styles the first value after the icon: space the counters explicitly.
                Kept after the values: the toolbar CSS spaces the value that directly follows the icon. #}
@@ -27,9 +35,21 @@
 
         {% set text %}
             <div class="sf-toolbar-info-piece">
-                <b>{{ collector.detached ? 'Detached HEAD' : 'Branch' }}</b>
-                <span>{{ collector.detached ? 'no branch checked out' : collector.branch }}</span>
+                <b>{{ rebasingBranch ? 'Rebasing' : (collector.detached ? 'Detached HEAD' : 'Branch') }}</b>
+                <span>{{ rebasingBranch ?? (collector.detached ? 'no branch checked out' : collector.branch) }}</span>
             </div>
+            {% if collector.operation %}
+                <div class="sf-toolbar-info-piece">
+                    <b>Operation</b>
+                    <span>{{ collector.operationToolbarLabel }}</span>
+                </div>
+            {% endif %}
+            {% if collector.conflictsCount > 0 %}
+                <div class="sf-toolbar-info-piece">
+                    <b>Conflicts</b>
+                    <span>{{ collector.conflictsCount }}</span>
+                </div>
+            {% endif %}
             <div class="sf-toolbar-info-piece">
                 <b>Commit</b>
                 <span>{{ collector.shortCommit }}</span>
@@ -40,7 +60,7 @@
             </div>
             <div class="sf-toolbar-info-piece">
                 <b>Unpushed commits</b>
-                <span>{{ collector.hasUpstream ? collector.unpushedCommitsCount : 'no upstream' }}</span>
+                <span>{{ collector.hasUpstream ? collector.unpushedCommitsCount : (rebasingBranch ? 'after the rebase' : 'no upstream') }}</span>
             </div>
             {% if collector.hasUpstream %}
                 <div class="sf-toolbar-info-piece">
@@ -50,7 +70,7 @@
             {% endif %}
         {% endset %}
 
-        {{ include('@WebProfiler/Profiler/toolbar_item.html.twig', { link: true }) }}
+        {{ include('@WebProfiler/Profiler/toolbar_item.html.twig', { link: true, status: collector.toolbarStatus }) }}
     {% endif %}
 {% endblock %}
 
@@ -73,10 +93,46 @@
     <h2>Git</h2>
 
     {% if collector.available %}
+        {% set rebasingBranch = collector.rebasingBranch %}
+        {% set operation = collector.operation %}
+        {% set conflictsCount = collector.conflictsCount %}
+
+        {% if operation %}
+            <style>
+                .git-operation { margin: 15px 0; padding: 10px 15px; border-radius: 6px; }
+                .git-operation p { margin: 0; }
+                .git-operation p + p { margin-top: 4px; }
+            </style>
+
+            <div class="git-operation {{ conflictsCount > 0 ? 'status-error' : 'status-warning' }}">
+                <p>
+                    <b>
+                        {%- if operation.kind == 'rebase' -%}
+                            Rebasing{% if operation.headName %} <code>{{ operation.headName }}</code>{% endif %}{% if operation.onto %} onto <code>{{ operation.onto }}</code>{% endif %}{% if operation.step is not null and operation.total is not null %} — step {{ operation.step }}/{{ operation.total }}{% endif %}
+                        {%- elseif operation.kind == 'merge' -%}
+                            {% if operation.target %}Merging <code>{{ operation.target }}</code>{% else %}Merge in progress{% endif %}
+                        {%- elseif operation.kind == 'am' -%}
+                            Applying patches (am){% if operation.step is not null and operation.total is not null %} — {{ operation.step }}/{{ operation.total }}{% endif %}
+                        {%- elseif operation.kind == 'cherry-pick' -%}
+                            Cherry-picking{% if operation.target %} <code>{{ operation.target }}</code>{% endif %}
+                        {%- elseif operation.kind == 'revert' -%}
+                            Reverting{% if operation.target %} <code>{{ operation.target }}</code>{% endif %}
+                        {%- else -%}
+                            {{ operation.label }}
+                        {%- endif -%}
+                    </b>
+                    {% if conflictsCount > 0 %} — {{ conflictsCount }} conflict{{ conflictsCount > 1 ? 's' }}{% endif %}
+                </p>
+                <p class="text-muted">
+                    {% for hint in operation.hints %}{% if not loop.first %} · {% endif %}<code>{{ hint }}</code>{% endfor %}
+                </p>
+            </div>
+        {% endif %}
+
         <div class="metrics">
             <div class="metric">
-                <span class="value">{{ collector.detached ? 'detached' : collector.branch }}</span>
-                <span class="label">{{ collector.detached ? 'Detached HEAD' : 'Branch' }}</span>
+                <span class="value">{{ rebasingBranch ?? (collector.detached ? 'detached' : collector.branch) }}</span>
+                <span class="label">{{ rebasingBranch ? 'Rebasing' : (collector.detached ? 'Detached HEAD' : 'Branch') }}</span>
             </div>
             <div class="metric">
                 <span class="value"><code>{{ collector.shortCommit }}</code></span>
@@ -86,6 +142,12 @@
                 <span class="value">{{ collector.changedFilesCount }}</span>
                 <span class="label">Modified files</span>
             </div>
+            {% if conflictsCount > 0 %}
+                <div class="metric">
+                    <span class="value">{{ conflictsCount }}</span>
+                    <span class="label">Conflicts</span>
+                </div>
+            {% endif %}
             <div class="metric">
                 <span class="value">{{ collector.hasUpstream ? collector.unpushedCommitsCount : '–' }}</span>
                 <span class="label">Unpushed commits</span>
@@ -188,7 +250,7 @@
                             </td>
                             <td>{{ file.statusLabel }}</td>
                             <td>{{ file.stageLabel }}</td>
-                            <td>{% if file.status != 'untracked' %}<span class="text-muted">+{{ file.additions }} −{{ file.deletions }}</span>{% endif %}</td>
+                            <td>{% if file.status not in ['untracked', 'conflicted'] %}<span class="text-muted">+{{ file.additions }} −{{ file.deletions }}</span>{% endif %}</td>
                         </tr>
                     {% endfor %}
                 </tbody>
@@ -199,7 +261,9 @@
         {% set behind = collector.behindCommitsCount %}
         {% if not collector.hasUpstream %}
             <div class="empty">
-                {% if collector.detached %}
+                {% if rebasingBranch %}
+                    <p>Rebase in progress — <code>{{ rebasingBranch }}</code> is compared with its upstream again once the rebase is finished.</p>
+                {% elseif collector.detached %}
                     <p>Detached HEAD — no branch, so no upstream to compare with.</p>
                 {% else %}
                     <p>No upstream branch configured for this branch.</p>

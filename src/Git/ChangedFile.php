@@ -19,6 +19,7 @@ final readonly class ChangedFile
         public ?string $oldPath = null,
         public int $additions = 0,
         public int $deletions = 0,
+        public ?ConflictKind $conflict = null,
     ) {
     }
 }

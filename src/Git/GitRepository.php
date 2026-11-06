@@ -31,6 +31,7 @@ final readonly class GitRepository implements GitRepositoryInterface
         private LogParser $logParser = new LogParser(),
         private int $graphCommitLimit = self::DEFAULT_GRAPH_COMMIT_LIMIT,
         ?LoggerInterface $logger = null,
+        private ?OperationDetector $operationDetector = null,
     ) {
         $this->logger = $logger ?? new NullLogger();
     }
@@ -81,6 +82,7 @@ final readonly class GitRepository implements GitRepositoryInterface
             $graphCommits,
             $hasUpstream ? $status->upstream : null,
             $hasUpstream ? $status->behind : 0,
+            $this->operationDetector?->detect(),
         );
     }
 
@@ -89,14 +91,18 @@ final readonly class GitRepository implements GitRepositoryInterface
      */
     private function workingFiles(StatusSnapshot $status): array
     {
-        $files = [];
+        // Conflicted files come first. `git diff` also reports every unmerged path (status "U" with --cached,
+        // "U" plus a bogus "M" against stage 2 without), so they are dropped from the diffs to be listed once.
+        $files = $status->conflicts;
+        $conflicted = array_flip(array_map(static fn (ChangedFile $file): string => $file->path, $status->conflicts));
+        $notConflicted = static fn (ChangedFile $file): bool => !isset($conflicted[$file->path]);
 
         if ($status->hasStaged) {
-            $files = [...$files, ...$this->diff(['diff', '--cached', ...self::DIFF_OPTIONS], FileStage::Staged, 'staged changes')];
+            $files = [...$files, ...array_filter($this->diff(['diff', '--cached', ...self::DIFF_OPTIONS], FileStage::Staged, 'staged changes'), $notConflicted)];
         }
 
         if ($status->hasUnstaged) {
-            $files = [...$files, ...$this->diff(['diff', ...self::DIFF_OPTIONS], FileStage::Unstaged, 'unstaged changes')];
+            $files = [...$files, ...array_filter($this->diff(['diff', ...self::DIFF_OPTIONS], FileStage::Unstaged, 'unstaged changes'), $notConflicted)];
         }
 
         foreach ($status->untracked as $path) {

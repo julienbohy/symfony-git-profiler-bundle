@@ -8,12 +8,16 @@ use JulienBohy\GitProfilerBundle\DataCollector\GitDataCollector;
 use JulienBohy\GitProfilerBundle\Git\ChangedFile;
 use JulienBohy\GitProfilerBundle\Git\Command\GitCommandRunnerInterface;
 use JulienBohy\GitProfilerBundle\Git\Command\TraceableGitCommandRunner;
+use JulienBohy\GitProfilerBundle\Git\ConflictKind;
 use JulienBohy\GitProfilerBundle\Git\FileStage;
 use JulienBohy\GitProfilerBundle\Git\FileStatus;
 use JulienBohy\GitProfilerBundle\Git\GitInfo;
 use JulienBohy\GitProfilerBundle\Git\GitRepositoryInterface;
 use JulienBohy\GitProfilerBundle\Git\GraphCommit;
+use JulienBohy\GitProfilerBundle\Git\Operation;
+use JulienBohy\GitProfilerBundle\Git\OperationKind;
 use JulienBohy\GitProfilerBundle\Git\UnpushedCommit;
+use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
 use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpFoundation\Response;
@@ -216,6 +220,100 @@ final class GitDataCollectorTest extends TestCase
         self::assertSame(0, $rows[2]['lane']);
         self::assertSame([0], $rows[2]['incomingLanes']);
         self::assertSame([], $rows[2]['segments']);
+    }
+
+    public function testExposesTheOperationInProgressAsPlainData(): void
+    {
+        $collector = $this->collectorReturning(new GitInfo(
+            'HEAD',
+            'abc1234',
+            true,
+            workingFiles: [
+                new ChangedFile('src/App.php', FileStatus::Conflicted, FileStage::Unmerged, conflict: ConflictKind::DeletedByThem),
+                new ChangedFile('README.md', FileStatus::Modified, FileStage::Unstaged),
+            ],
+            operation: new Operation(OperationKind::Rebase, 3, 7, 'feature/x', '1a2b3c4'),
+        ));
+
+        self::assertTrue($collector->hasOperation());
+        self::assertSame([
+            'kind' => 'rebase',
+            'label' => 'Rebasing',
+            'shortLabel' => 'rebasing',
+            'step' => 3,
+            'total' => 7,
+            'headName' => 'feature/x',
+            'onto' => '1a2b3c4',
+            'target' => null,
+            'hints' => ['git rebase --continue', 'git rebase --abort'],
+        ], $collector->getOperation());
+        self::assertSame('feature/x', $collector->getRebasingBranch());
+        self::assertSame('rebasing 3/7', $collector->getOperationToolbarLabel());
+        self::assertSame(1, $collector->getConflictsCount());
+        self::assertSame(2, $collector->getChangedFilesCount());
+
+        $file = $collector->getWorkingFiles()[0];
+        self::assertSame('conflicted', $file['status']);
+        self::assertSame('Conflict — deleted by them', $file['statusLabel']);
+        self::assertSame('unmerged', $file['stage']);
+        self::assertSame('UD', $file['conflict']);
+        self::assertNull($collector->getWorkingFiles()[1]['conflict']);
+    }
+
+    public function testNoOperation(): void
+    {
+        $collector = $this->collectorReturning(new GitInfo('main', 'abc1234', false));
+
+        self::assertFalse($collector->hasOperation());
+        self::assertNull($collector->getOperation());
+        self::assertNull($collector->getRebasingBranch());
+        self::assertNull($collector->getOperationToolbarLabel());
+        self::assertSame(0, $collector->getConflictsCount());
+        self::assertSame('normal', $collector->getToolbarStatus());
+
+        $unavailable = $this->collectorReturning(null);
+        self::assertNull($unavailable->getOperation());
+        self::assertSame('normal', $unavailable->getToolbarStatus());
+    }
+
+    public function testOnlyARebaseExposesARebasingBranch(): void
+    {
+        $collector = $this->collectorReturning(new GitInfo('HEAD', 'abc1234', false, operation: new Operation(OperationKind::Merge, headName: 'feature')));
+        self::assertNull($collector->getRebasingBranch());
+
+        $detached = $this->collectorReturning(new GitInfo('HEAD', 'abc1234', false, operation: new Operation(OperationKind::Rebase, 1, 2)));
+        self::assertNull($detached->getRebasingBranch());
+    }
+
+    public function testToolbarStatus(): void
+    {
+        $conflict = new ChangedFile('a.txt', FileStatus::Conflicted, FileStage::Unmerged, conflict: ConflictKind::BothModified);
+
+        self::assertSame('yellow', $this->collectorReturning(new GitInfo('main', 'abc1234', false, operation: new Operation(OperationKind::Bisect)))->getToolbarStatus());
+        self::assertSame('red', $this->collectorReturning(new GitInfo('main', 'abc1234', true, [$conflict], operation: new Operation(OperationKind::Merge)))->getToolbarStatus());
+        self::assertSame('red', $this->collectorReturning(new GitInfo('main', 'abc1234', true, [$conflict]))->getToolbarStatus());
+    }
+
+    #[DataProvider('toolbarLabels')]
+    public function testOperationToolbarLabel(Operation $operation, string $expected): void
+    {
+        self::assertSame($expected, $this->collectorReturning(new GitInfo('main', 'abc1234', false, operation: $operation))->getOperationToolbarLabel());
+    }
+
+    /**
+     * @return iterable<string, array{Operation, string}>
+     */
+    public static function toolbarLabels(): iterable
+    {
+        yield 'merge' => [new Operation(OperationKind::Merge), 'merging'];
+        yield 'rebase' => [new Operation(OperationKind::Rebase, 3, 7), 'rebasing 3/7'];
+        yield 'rebase without counters' => [new Operation(OperationKind::Rebase), 'rebasing'];
+        yield 'rebase with a step only' => [new Operation(OperationKind::Rebase, 3), 'rebasing'];
+        yield 'rebase with a total only' => [new Operation(OperationKind::Rebase, null, 7), 'rebasing'];
+        yield 'am' => [new Operation(OperationKind::ApplyMailbox, 2, 5), 'am 2/5'];
+        yield 'cherry-pick' => [new Operation(OperationKind::CherryPick), 'cherry-picking'];
+        yield 'revert' => [new Operation(OperationKind::Revert), 'reverting'];
+        yield 'bisect' => [new Operation(OperationKind::Bisect), 'bisecting'];
     }
 
     public function testDegradesGracefullyWhenNotAGitRepository(): void

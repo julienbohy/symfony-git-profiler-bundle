@@ -10,11 +10,12 @@ namespace JulienBohy\GitProfilerBundle\Git;
 final readonly class GitInfo
 {
     /**
-     * @param list<ChangedFile>    $workingFiles    uncommitted files in the working tree
+     * @param list<ChangedFile>    $workingFiles    uncommitted files in the working tree, conflicted ones first
      * @param list<UnpushedCommit> $unpushedCommits local commits ahead of the remote
      * @param list<ChangedFile>    $unpushedFiles   files touched by the unpushed commits
      * @param list<GraphCommit>    $graphCommits    recent commits of HEAD and its upstream, log order
      * @param int                  $behindCount     commits on the upstream not in HEAD, as of the last fetch
+     * @param ?Operation           $operation       merge, rebase... currently in progress
      */
     public function __construct(
         public string $branch,
@@ -27,6 +28,7 @@ final readonly class GitInfo
         public array $graphCommits = [],
         public ?string $upstreamRef = null,
         public int $behindCount = 0,
+        public ?Operation $operation = null,
     ) {
     }
 }

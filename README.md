@@ -91,7 +91,9 @@ The **detailed panel** additionally shows:
   and merge/divergence curves; when an upstream is configured, hollow dots are commits not
   pushed yet, and badges mark `HEAD` and the upstream tip;
 - the **list of uncommitted working-tree files** (staged, unstaged, untracked) with their status
-  (added, modified, deleted, renamed…);
+  (added, modified, deleted, renamed…), merge conflicts first;
+- a banner when a **merge, rebase, cherry-pick, revert, `git am` or bisect is in progress** (toolbar
+  turns yellow, or red with conflicts);
 - the **list of local commits ahead of the remote** (unpushed) — short hash, message, author, date —
   **together with the list of files they touch**.
 

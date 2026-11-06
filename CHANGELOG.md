@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Operation in progress: the panel and the toolbar now show a merge, rebase (with step and branch),
+  `git am`, cherry-pick, revert or bisect left in progress, with a banner and the commands that
+  continue or abort it. During a rebase, the branch being rebased is shown instead of "Detached HEAD".
+  The toolbar turns yellow, with a label such as `rebasing 3/7`. It costs one extra
+  `git rev-parse --git-dir` command (the git directory is detected once per process).
+- Merge conflicts: conflicted files are listed first in "Locally modified files" with their kind
+  (both modified, deleted by us…), counted in a new "Conflicts" card, and turn the toolbar red.
+  They are no longer duplicated by the staged/unstaged diffs.
+
 ## [0.3.2] - 2026-11-05
 
 ### Added

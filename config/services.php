@@ -8,6 +8,7 @@ use JulienBohy\GitProfilerBundle\Git\Command\ProcessGitCommandRunner;
 use JulienBohy\GitProfilerBundle\Git\Command\TraceableGitCommandRunner;
 use JulienBohy\GitProfilerBundle\Git\GitRepository;
 use JulienBohy\GitProfilerBundle\Git\GitRepositoryInterface;
+use JulienBohy\GitProfilerBundle\Git\OperationDetector;
 use JulienBohy\GitProfilerBundle\Git\Parser\DiffParser;
 use JulienBohy\GitProfilerBundle\Git\Parser\LogParser;
 use JulienBohy\GitProfilerBundle\Git\Parser\StatusParser;
@@ -35,6 +36,14 @@ return static function (ContainerConfigurator $container): void {
     $services->set(DiffParser::class);
     $services->set(LogParser::class);
 
+    $services->set(OperationDetector::class)
+        ->args([
+            service(GitCommandRunnerInterface::class),
+            param('kernel.project_dir'),
+            service('logger')->nullOnInvalid(),
+        ])
+        ->tag('monolog.logger', ['channel' => 'git_profiler']);
+
     $services->set(GitRepository::class)
         ->args([
             service(GitCommandRunnerInterface::class),
@@ -43,6 +52,7 @@ return static function (ContainerConfigurator $container): void {
             service(LogParser::class),
             param('git_profiler.graph_commit_limit'),
             service('logger')->nullOnInvalid(),
+            service(OperationDetector::class),
         ])
         ->tag('monolog.logger', ['channel' => 'git_profiler']);
 

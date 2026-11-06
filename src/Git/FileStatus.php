@@ -14,6 +14,7 @@ enum FileStatus: string
     case Deleted = 'deleted';
     case Renamed = 'renamed';
     case Untracked = 'untracked';
+    case Conflicted = 'conflicted';
 
     public function label(): string
     {
@@ -23,6 +24,7 @@ enum FileStatus: string
             self::Deleted => 'Deleted',
             self::Renamed => 'Renamed',
             self::Untracked => 'Untracked',
+            self::Conflicted => 'Conflict',
         };
     }
 }

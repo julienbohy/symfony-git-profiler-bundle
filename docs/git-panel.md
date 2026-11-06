@@ -37,8 +37,8 @@ The segment shows the branch name followed by counters:
 | ↑ | Commits not pushed yet (`@{u}..HEAD`). Shows `–` when there is no upstream. |
 | ↓ | Commits on the upstream that you do not have, **as of the last fetch**. Only displayed when greater than 0. |
 
-Hovering opens the detail block: branch, short commit, the version and the number of stashes when there are some, and the same three numbers. While an
-operation is in progress the segment turns yellow (red with conflicts) and shows its label, e.g.
+Hovering opens the detail block: branch, short commit, the version and the number of stashes when
+there are some, and the same three numbers. While an operation is in progress the segment turns yellow (red with conflicts) and shows its label, e.g.
 `rebasing 3/7` (see [Operations in progress and conflicts](#operations-in-progress-and-conflicts)).
 
 The toolbar is a quick "am I about to test the right code?" check: wrong branch, forgotten local
@@ -49,7 +49,7 @@ menu carries a `files / unpushed` badge when either number is non-zero.
 
 ![Panel on a clean branch](assets/screens/01-clean-panel.png)
 
-*A clean branch, in sync with its upstream. Three git commands, about 45 ms.*
+*A clean branch, in sync with its upstream, with a reachable tag: six git commands, about 70 ms.*
 
 The panel opens with five cards: **Branch** (or **Detached HEAD**), **Short commit**, **Modified
 files**, **Unpushed commits** and **Behind upstream**. Cards without a meaning in the current state
@@ -149,13 +149,15 @@ When the remote is on a known host, the graph becomes clickable:
 | Hash of a **pushed** commit | The commit page |
 | Upstream badge (`origin/main`) | The branch page on the remote |
 | "Compare on GitHub" in *Unpushed commits* | HEAD against the upstream branch, only when **behind and not ahead** |
-| "GitHub" in the graph legend | The repository |
+| "GitHub" in the graph legend | The repository (shown only with an upstream, since nothing is linked otherwise) |
 
 | Provider | Detected from the host | Commit | Branch | Compare |
 |---|---|---|---|---|
 | GitHub | `github.com` | `/commit/<sha>` | `/tree/<branch>` | `/compare/<sha>...<branch>` |
 | GitLab | `gitlab.com`, or any host containing `gitlab` | `/-/commit/<sha>` | `/-/tree/<branch>` | `/-/compare/<sha>...<branch>` |
 | Bitbucket | `bitbucket.org` | `/commits/<sha>` | `/branch/<branch>` | none (no reliable pattern) |
+
+![Pushed commits, upstream badge and "Compare on GitHub" linked; Version and Stashes cards](assets/screens/11-links-version-stashes-panel.png)
 
 Any other host (Gitea, Azure DevOps, a self-hosted GitHub or Bitbucket Server, a local path…) gets no
 links: URLs are never guessed. Links open in a new tab with `rel="noopener noreferrer"`.
@@ -190,6 +192,8 @@ Everything is computed from local data, with no network access.
 **Version** is `git describe --tags --abbrev=7 HEAD`: the nearest tag reachable from `HEAD`, annotated or
 not. `0.4.0` means `HEAD` is that tag; `0.4.0-3-g2897d71` means 3 commits after it, at commit `2897d71`.
 It is shown as a card and as a toolbar tooltip row.
+
+![Toolbar tooltip with the Version and Stashes rows](assets/screens/11-links-version-stashes-toolbar.png)
 
 `git describe` fails when there is nothing to describe, which would put a red *Failed* row in the list of
 commands on every request of a tag-less repository (common for applications). So the bundle first checks
@@ -228,9 +232,15 @@ conflicts is part of the banner):
 | Revert | Reverting `abc1234` | `git revert --continue` · `git revert --abort` |
 | Bisect | Bisect in progress | `git bisect reset` |
 
+![Rebase stopped at step 2/3 on a conflict: red banner, "Rebasing" and "Conflicts" cards, conflicted file listed first](assets/screens/09-rebase-conflict-panel.png)
+
+![Merge with one conflict and one cleanly merged, staged file](assets/screens/10-merge-conflict-panel.png)
+
 **Toolbar.** The segment is yellow during an operation and red when there are conflicts, shows a
 label (`rebasing 3/7`, `merging`, `am 2/5`, `cherry-picking`, `reverting`, `bisecting`) and a `⚠ N`
 counter for the conflicts; the hover block gets an *Operation* and a *Conflicts* row.
+
+![Toolbar during a rebase with a conflict](assets/screens/09-rebase-conflict-toolbar.png)
 
 **Rebase and detached HEAD.** `HEAD` is detached while a rebase is stopped. Instead of "Detached HEAD",
 the first card (and the toolbar) read **Rebasing** with the branch being rebased. A rebase of a
@@ -312,7 +322,7 @@ corresponding section degrades alone: it is empty and the rest of the panel stay
 
 The last section lists every git command run **for this request**, with its duration and outcome:
 
-![Git commands section, 5 commands](assets/screens/05-diverged-panel.png)
+![Git commands section, 8 commands on a diverged branch](assets/screens/05-diverged-panel.png)
 
 *Commands of the diverged case (see the bottom of the screenshot): status, show, log, diff, graph log.*
 
@@ -400,7 +410,7 @@ Safeguards on every git process:
 - Linked worktrees and submodules (where `.git` is a file) are supported.
 
 **Cost.** 5 to 10 short-lived processes per profiled request, about 10 to 20 ms each on a normal
-repository; in the screenshots, 37 to 71 ms in total. Because this happens after the response, it adds
+repository; in the screenshots, 63 to 88 ms in total. Because this happens after the response, it adds
 no latency to the page itself. It does keep the PHP worker busy a little longer: with PHP-FPM
 (`fastcgi_finish_request`) the client is already released; with servers that do not flush before
 `kernel.terminate`, the response may be held until collection ends.

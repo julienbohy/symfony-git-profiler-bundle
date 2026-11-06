@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- The commit graph no longer says "Pushed commits link to GitHub" when there is no upstream (detached
+  HEAD, branch without upstream, rebase in progress): nothing is known to be pushed then, so nothing is
+  linked.
+
+### Changed
+
+- [Git panel guide](https://github.com/julienbohy/symfony-git-profiler-bundle/blob/main/docs/git-panel.md):
+  every screenshot retaken on 0.5.0, and new ones for the remote links, the Version and Stashes cards, a
+  rebase stopped on a conflict and a merge with a conflict. README screenshots refreshed.
+
 ## [0.5.0] - 2026-11-06
 
 ### Added

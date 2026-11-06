@@ -205,7 +205,8 @@
             <p class="text-muted">
                 Recent commits of <code>HEAD</code>{% if collector.hasUpstream %} and its upstream <code>{{ collector.upstreamRef }}</code>{% endif %}.
                 {% if collector.hasUpstream %}Hollow dots are commits not pushed to the upstream yet.{% endif %}
-                {% if collector.remote %}Pushed commits link to <a href="{{ collector.remote.url }}" target="_blank" rel="noopener noreferrer">{{ collector.remote.provider }}</a>.{% endif %}
+                {# Without an upstream nothing is known to be pushed, so nothing is linked: don't announce links. #}
+                {% if collector.remote and collector.hasUpstream %}Pushed commits link to <a href="{{ collector.remote.url }}" target="_blank" rel="noopener noreferrer">{{ collector.remote.provider }}</a>.{% endif %}
             </p>
 
             {# One 28px-high SVG per row: lane lines in the cell, commit details beside. #}

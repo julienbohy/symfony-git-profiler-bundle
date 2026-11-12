@@ -14,3 +14,5 @@ jobs:
 
   quality:
     uses: ./.github/workflows/quality.yml
+    # CODECOV_TOKEN for the coverage upload (reusable workflows do not see the caller's secrets otherwise).
+    secrets: inherit

@@ -31,6 +31,18 @@ jobs:
       - name: PHP CS Fixer
         run: composer cs
 
+      - name: PHPUnit with coverage
+        run: vendor/bin/phpunit --coverage-clover coverage.xml
+
+      # Without the token (pull requests from forks), Codecov falls back to its tokenless upload for public repositories.
+      - name: Upload coverage reports to Codecov
+        uses: codecov/codecov-action@v5
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          slug: julienbohy/symfony-git-profiler-bundle
+          files: coverage.xml
+          fail_ci_if_error: false
+
       - name: Infection (git output parsers)
         run: vendor/bin/infection --threads=2 --no-progress --show-mutations
 

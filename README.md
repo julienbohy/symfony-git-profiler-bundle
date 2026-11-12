@@ -3,6 +3,7 @@
 [![Latest Version](https://img.shields.io/packagist/v/julienbohy/git-profiler-bundle)](https://packagist.org/packages/julienbohy/git-profiler-bundle)
 [![Total Downloads](https://img.shields.io/packagist/dt/julienbohy/git-profiler-bundle)](https://packagist.org/packages/julienbohy/git-profiler-bundle)
 [![CI](https://github.com/julienbohy/symfony-git-profiler-bundle/actions/workflows/ci.yml/badge.svg)](https://github.com/julienbohy/symfony-git-profiler-bundle/actions/workflows/ci.yml)
+[![codecov](https://codecov.io/gh/julienbohy/symfony-git-profiler-bundle/graph/badge.svg)](https://codecov.io/gh/julienbohy/symfony-git-profiler-bundle)
 [![License](https://img.shields.io/github/license/julienbohy/symfony-git-profiler-bundle)](LICENSE)
 ![PHP](https://img.shields.io/badge/PHP-8.3%2B-777BB4?logo=php&logoColor=white)
 ![Symfony](https://img.shields.io/badge/Symfony-6.4%20%7C%207.4%20%7C%208-000000?logo=symfony&logoColor=white)

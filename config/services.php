@@ -3,6 +3,8 @@
 declare(strict_types=1);
 
 use JulienBohy\GitProfilerBundle\DataCollector\GitDataCollector;
+use JulienBohy\GitProfilerBundle\Git\Cache\GitCacheKeys;
+use JulienBohy\GitProfilerBundle\Git\Cache\GitOutputCache;
 use JulienBohy\GitProfilerBundle\Git\Command\GitCommandRunnerInterface;
 use JulienBohy\GitProfilerBundle\Git\Command\ProcessGitCommandRunner;
 use JulienBohy\GitProfilerBundle\Git\Command\TraceableGitCommandRunner;
@@ -47,8 +49,20 @@ return static function (ContainerConfigurator $container): void {
     $services->set(PackedRefsParser::class);
     $services->set(RemoteUrlParser::class);
 
+    $services->set(GitCacheKeys::class);
+
+    // The pool 'git_profiler.cache' only exists when the kernel has a cache directory (see GitProfilerBundle):
+    // without it, nothing is cached.
+    $services->set(GitOutputCache::class)
+        ->args([service('git_profiler.cache')->nullOnInvalid(), service(TraceableGitCommandRunner::class)->nullOnInvalid()]);
+
     $services->set(GitDirectory::class)
-        ->args([service(GitCommandRunnerInterface::class), param('kernel.project_dir')]);
+        ->args([
+            service(GitCommandRunnerInterface::class),
+            param('kernel.project_dir'),
+            service(GitOutputCache::class),
+            service(GitCacheKeys::class),
+        ]);
 
     $services->set(StashCounter::class)
         ->args([service(GitDirectory::class), service(ReflogParser::class)]);
@@ -78,6 +92,9 @@ return static function (ContainerConfigurator $container): void {
             service(RemoteUrlParser::class),
             service(StashCounter::class),
             service(TagPresence::class),
+            service(GitDirectory::class),
+            service(GitOutputCache::class),
+            service(GitCacheKeys::class),
         ])
         ->tag('monolog.logger', ['channel' => 'git_profiler']);
 

@@ -267,6 +267,58 @@ final class GitTemplateRenderingTest extends TestCase
         self::assertStringContainsString('simulated failure', $html);
     }
 
+    public function testCachedCommandsAreListedAsCachedWithoutDuration(): void
+    {
+        $tracer = new TraceableGitCommandRunner(new class implements GitCommandRunnerInterface {
+            public function run(array $args): string
+            {
+                return '';
+            }
+        });
+        $readGit = static function () use ($tracer): void {
+            $tracer->run(['status', '-z']);
+            $tracer->recordCached(['config', '--null', '--list']);
+            $tracer->recordCached(['describe', '--tags', '--abbrev=7', 'HEAD']);
+        };
+
+        $html = $this->render(new GitInfo('main', 'abc1234', false), $tracer, $readGit);
+
+        self::assertStringContainsString('3 commands (2 cached) in', $html);
+        self::assertSame(2, substr_count($html, '<span class="text-muted">cached</span>'));
+        self::assertMatchesRegularExpression('#<code>git config --null --list</code></td>\s*<td>&mdash;</td>\s*<td>\s*<span class="text-muted">cached</span>#', $html);
+        self::assertMatchesRegularExpression('#<code>git status -z</code></td>\s*<td>[0-9.]+&nbsp;ms</td>\s*<td>\s*OK#', $html);
+    }
+
+    public function testWithoutCachedCommandsNothingIsSaidAboutTheCache(): void
+    {
+        $tracer = new TraceableGitCommandRunner(new class implements GitCommandRunnerInterface {
+            public function run(array $args): string
+            {
+                return '';
+            }
+        });
+
+        $html = $this->render(new GitInfo('main', 'abc1234', false), $tracer, static fn () => $tracer->run(['status']));
+
+        self::assertStringContainsString('1 command in', $html);
+        self::assertStringNotContainsString('cached', $html);
+    }
+
+    public function testAProfileCollectedBeforeTheCacheExistedStillRendersItsCommands(): void
+    {
+        $collector = new GitDataCollector($this->createStub(GitRepositoryInterface::class));
+        (new \ReflectionProperty(GitDataCollector::class, 'data'))->setValue($collector, [
+            'available' => true,
+            'branch' => 'main',
+            'commands' => [['command' => 'git status', 'durationMs' => 12.0, 'successful' => true, 'error' => null]],
+        ]);
+
+        $html = $this->renderCollector($collector);
+
+        self::assertStringContainsString('12.0&nbsp;ms', $html);
+        self::assertStringNotContainsString('cached', $html);
+    }
+
     public function testNoBannerAndANormalToolbarWithoutOperation(): void
     {
         $html = $this->render(new GitInfo('main', 'abc1234', false));

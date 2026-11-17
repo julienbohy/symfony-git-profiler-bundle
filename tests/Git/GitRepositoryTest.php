@@ -559,6 +559,7 @@ final class GitRepositoryTest extends TestCase
             operationDetector: new OperationDetector($this->tracer, $directory, $this->logger, $gitDirectory),
             stashCounter: new StashCounter($gitDirectory),
             tagPresence: new TagPresence($gitDirectory),
+            gitDirectory: $gitDirectory,
         );
     }
 

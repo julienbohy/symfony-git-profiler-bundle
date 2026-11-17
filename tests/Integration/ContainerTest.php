@@ -8,6 +8,7 @@ use JulienBohy\GitProfilerBundle\DataCollector\GitDataCollector;
 use JulienBohy\GitProfilerBundle\Git\GitRepository;
 use JulienBohy\GitProfilerBundle\Git\GitRepositoryInterface;
 use JulienBohy\GitProfilerBundle\Tests\GitProfilerBundleConfigurationTest;
+use JulienBohy\GitProfilerBundle\Tests\Support\TemporaryDirectory;
 use PHPUnit\Framework\TestCase;
 use Symfony\Component\DependencyInjection\ContainerBuilder;
 use Symfony\Component\HttpFoundation\Request;
@@ -18,6 +19,8 @@ use Symfony\Component\HttpFoundation\Response;
  */
 final class ContainerTest extends TestCase
 {
+    use TemporaryDirectory;
+
     public function testServicesAndDataCollectorTagAreRegistered(): void
     {
         $container = $this->loadContainer();
@@ -58,6 +61,50 @@ final class ContainerTest extends TestCase
         self::assertIsArray($collector->getWorkingFiles());
         self::assertIsArray($collector->getUnpushedCommits());
         self::assertIsArray($collector->getUnpushedFiles());
+    }
+
+    public function testTheGitOutputsAreCachedInTheKernelCacheDirectoryAcrossRequests(): void
+    {
+        $cacheDir = $this->createTemporaryDirectory('gpb_container_');
+
+        try {
+            $first = $this->collect($cacheDir);
+            $second = $this->collect($cacheDir);
+
+            self::assertDirectoryExists($cacheDir . '/git_profiler');
+            self::assertSame(0, $first->getCachedCommandsCount());
+            // A new container is another request: what was cached by the first one is served to the second.
+            self::assertGreaterThan(0, $second->getCachedCommandsCount());
+            self::assertSame($first->getBranch(), $second->getBranch());
+            self::assertSame($first->getShortCommit(), $second->getShortCommit());
+        } finally {
+            $this->removeDirectory($cacheDir);
+        }
+    }
+
+    public function testWithoutAKernelCacheDirectoryTheCollectorStillWorksWithoutCache(): void
+    {
+        $first = $this->collect(null);
+        $second = $this->collect(null);
+
+        self::assertTrue($second->isAvailable());
+        self::assertSame(0, $first->getCachedCommandsCount());
+        self::assertSame(0, $second->getCachedCommandsCount());
+        self::assertNotEmpty($second->getCommands());
+    }
+
+    private function collect(?string $cacheDir): GitDataCollector
+    {
+        $container = GitProfilerBundleConfigurationTest::load(parameters: $cacheDir !== null ? ['kernel.cache_dir' => $cacheDir] : []);
+        $container->getDefinition(GitDataCollector::class)->setPublic(true);
+        $container->compile();
+
+        $collector = $container->get(GitDataCollector::class);
+        self::assertInstanceOf(GitDataCollector::class, $collector);
+        $collector->collect(new Request(), new Response());
+        $collector->lateCollect();
+
+        return $collector;
     }
 
     private function loadContainer(): ContainerBuilder

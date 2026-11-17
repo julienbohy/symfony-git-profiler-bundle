@@ -4,12 +4,16 @@ declare(strict_types=1);
 
 namespace JulienBohy\GitProfilerBundle\Tests\Git;
 
+use JulienBohy\GitProfilerBundle\Git\Cache\GitCacheKeys;
+use JulienBohy\GitProfilerBundle\Git\Cache\GitOutputCache;
 use JulienBohy\GitProfilerBundle\Git\Command\GitCommandRunnerInterface;
 use JulienBohy\GitProfilerBundle\Git\GitDirectory;
 use JulienBohy\GitProfilerBundle\Git\StashCounter;
 use JulienBohy\GitProfilerBundle\Git\TagPresence;
+use JulienBohy\GitProfilerBundle\Tests\Support\CountingGitRunner;
 use JulienBohy\GitProfilerBundle\Tests\Support\TemporaryDirectory;
 use PHPUnit\Framework\TestCase;
+use Symfony\Component\Cache\Adapter\ArrayAdapter;
 
 final class GitDirectoryTest extends TestCase
 {
@@ -100,6 +104,66 @@ final class GitDirectoryTest extends TestCase
         self::assertSame(1, $runner->calls);
     }
 
+    public function testTheLocationIsKeptAcrossRequestsInTheCache(): void
+    {
+        $pool = new ArrayAdapter();
+        $first = $this->countingRunner('.git');
+        $second = $this->countingRunner('.git');
+
+        $a = new GitDirectory($first, $this->root, new GitOutputCache($pool));
+        self::assertFalse($a->peek());
+        self::assertSame($this->root . '/.git', $a->path());
+        self::assertSame(1, $first->calls);
+
+        // Another request (another instance, same pool): no command at all.
+        $b = new GitDirectory($second, $this->root, new GitOutputCache($pool));
+        self::assertTrue($b->peek());
+        self::assertSame($this->root . '/.git', $b->path());
+        self::assertSame($this->root . '/.git', $b->commonPath());
+        self::assertSame(0, $second->calls);
+    }
+
+    public function testACachedLocationThatNoLongerExistsIsIgnored(): void
+    {
+        $cache = new GitOutputCache(new ArrayAdapter());
+        $key = (new GitCacheKeys())->gitDirectory(GitDirectory::LOCATE_COMMAND, $this->root);
+        self::assertNotNull($key);
+        $cache->store($key, "../gone/.git\n");
+
+        $runner = $this->countingRunner('.git');
+        $directory = new GitDirectory($runner, $this->root, $cache);
+
+        self::assertFalse($directory->peek());
+        self::assertSame($this->root . '/.git', $directory->path());
+        self::assertSame(1, $runner->calls);
+    }
+
+    public function testNothingIsCachedWithoutAPool(): void
+    {
+        $runner = $this->countingRunner('.git');
+
+        (new GitDirectory($runner, $this->root))->path();
+        $other = new GitDirectory($runner, $this->root);
+
+        self::assertFalse($other->peek());
+        self::assertSame($this->root . '/.git', $other->path());
+        self::assertSame(2, $runner->calls);
+    }
+
+    public function testALocationThatCannotBeResolvedIsNotCached(): void
+    {
+        $pool = new ArrayAdapter();
+        $directory = new GitDirectory($this->countingRunner('missing'), $this->root, new GitOutputCache($pool));
+
+        try {
+            $directory->path();
+            self::fail('An exception was expected.');
+        } catch (\UnexpectedValueException) {
+        }
+
+        self::assertFalse((new GitDirectory($this->countingRunner('.git'), $this->root, new GitOutputCache($pool)))->peek());
+    }
+
     public function testStashesAreCountedFromTheReflog(): void
     {
         $counter = new StashCounter($this->directory($this->root . '/.git'));
@@ -150,6 +214,11 @@ final class GitDirectoryTest extends TestCase
 
         file_put_contents($this->root . '/.git/packed-refs', "# pack-refs with: peeled\n" . $sha . " refs/heads/main\n" . $sha . " refs/tags/1.0\n^" . $sha . "\n");
         self::assertTrue((new TagPresence($this->directory($this->root . '/.git')))->mightHaveTags());
+    }
+
+    private function countingRunner(string $output): CountingGitRunner
+    {
+        return new CountingGitRunner($output);
     }
 
     private function directory(string $gitDirectory): GitDirectory

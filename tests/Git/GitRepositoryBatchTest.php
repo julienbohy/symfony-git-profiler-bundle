@@ -203,6 +203,39 @@ final class GitRepositoryBatchTest extends TestCase
         self::assertNotEmpty($info->workingFiles);
     }
 
+    public function testAFailingGitDirectoryLookupOnlyLosesTheKeysThatNeedIt(): void
+    {
+        // `rev-parse --git-dir` fails: no common git directory, so describe and the config are not cached,
+        // but every section is still read.
+        $pool = new ArrayAdapter();
+        $runner = $this->recorder(failing: '--git-dir');
+
+        $info = $this->repository($runner, $pool)->read();
+
+        self::assertNotNull($info);
+        self::assertNotEmpty($info->graphCommits);
+        self::assertCount(1, $info->unpushedCommits);
+        self::assertNotEmpty($info->workingFiles);
+        self::assertSame('v1-1-g' . substr($this->gitOutput('rev-parse', 'HEAD'), 0, 7), $info->describe);
+    }
+
+    public function testAnUnexpectedShowOutputMakesThePanelUnavailable(): void
+    {
+        $inner = new ProcessGitCommandRunner($this->dir);
+        $runner = new class($inner) implements GitCommandRunnerInterface {
+            public function __construct(private readonly GitCommandRunnerInterface $inner)
+            {
+            }
+
+            public function run(array $args): string
+            {
+                return $args[0] === 'show' ? "not a hash\n" : $this->inner->run($args);
+            }
+        };
+
+        self::assertNull((new GitRepository($runner))->read());
+    }
+
     public function testFailedCommandsAreNeverCached(): void
     {
         $pool = new ArrayAdapter();

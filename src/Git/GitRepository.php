@@ -89,8 +89,9 @@ final readonly class GitRepository implements GitRepositoryInterface
 
         // Known without any process (memoized or cached): the keys that only need the common git directory can
         // be computed before the first batch.
-        $directoryKnown = $this->gitDirectory?->peek() ?? false;
-        $common = $directoryKnown ? $this->commonDirectory(null, true) : null;
+        $directory = $this->gitDirectory;
+        $directoryKnown = $directory?->peek() ?? false;
+        $common = $directory !== null && $directoryKnown ? $this->commonDirectory($directory, null) : null;
 
         // First wave: HEAD and upstream (always live), the diffs (never cached), the git directory when it is
         // not known yet, and everything that does not wait for them.
@@ -105,7 +106,7 @@ final readonly class GitRepository implements GitRepositoryInterface
         if ($status->hasUnstaged) {
             $batch->add('unstaged', ['diff', ...self::DIFF_OPTIONS]);
         }
-        if ($this->gitDirectory !== null && !$directoryKnown) {
+        if ($directory !== null && !$directoryKnown) {
             $batch->add('git-dir', GitDirectory::LOCATE_COMMAND);
         }
         $this->queueHistory($batch, $status, $common, $upstreamOid, false, $queued);
@@ -113,8 +114,8 @@ final readonly class GitRepository implements GitRepositoryInterface
 
         [$shownHead, $shortCommit, $shownUpstream, $upstreamShortHash] = $this->shown($results['show']->output(), $hasUpstream);
         $upstreamOid = $shownUpstream;
-        if (isset($results['git-dir'])) {
-            $common = $this->commonDirectory($results['git-dir'], false);
+        if ($directory !== null && isset($results['git-dir'])) {
+            $common = $this->commonDirectory($directory, $results['git-dir']);
         }
 
         // Cache what ran only when HEAD did not move between `status` and `show` (the keys come from `status`).
@@ -229,22 +230,17 @@ final readonly class GitRepository implements GitRepositoryInterface
     }
 
     /**
-     * Keeps the git directory located by the batch and returns the common git directory, null when unknown.
+     * Keeps the git directory located by the batch (when it ran) and returns the common git directory, null
+     * when it cannot be determined.
      */
-    private function commonDirectory(?GitCommandResult $located, bool $known): ?string
+    private function commonDirectory(GitDirectory $directory, ?GitCommandResult $located): ?string
     {
-        if ($this->gitDirectory === null) {
-            return null;
-        }
-
         try {
             if ($located !== null) {
-                $this->gitDirectory->locate($located->output());
-            } elseif (!$known) {
-                return null;
+                $directory->locate($located->output());
             }
 
-            return $this->gitDirectory->commonPath();
+            return $directory->commonPath();
         } catch (\Throwable $e) {
             $this->logDegraded('git directory', $e);
 

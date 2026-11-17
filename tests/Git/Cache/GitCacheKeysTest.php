@@ -103,6 +103,19 @@ final class GitCacheKeysTest extends TestCase
         self::assertNotSame($key, $this->keys->describe(['describe'], $this->common, self::OID));
     }
 
+    public function testDescribeWithoutALooseTagsDirectoryStillSeesPackedRefs(): void
+    {
+        // After `git pack-refs --all`, `refs/tags` may be missing altogether.
+        rmdir($this->common . '/refs/tags');
+        $key = $this->keys->describe(['describe'], $this->common, self::OID);
+
+        self::assertNotNull($key);
+
+        file_put_contents($this->common . '/packed-refs', self::OID . " refs/tags/v1\n");
+
+        self::assertNotSame($key, $this->keys->describe(['describe'], $this->common, self::OID));
+    }
+
     public function testDescribeSeesPackedRefsChange(): void
     {
         $key = $this->keys->describe(['describe'], $this->common, self::OID);

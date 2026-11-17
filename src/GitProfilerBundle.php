@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace JulienBohy\GitProfilerBundle;
 
+use Symfony\Component\Cache\Adapter\FilesystemAdapter;
 use Symfony\Component\Config\Definition\Configurator\DefinitionConfigurator;
 use Symfony\Component\DependencyInjection\ContainerBuilder;
 use Symfony\Component\DependencyInjection\Loader\Configurator\ContainerConfigurator;
@@ -50,6 +51,14 @@ final class GitProfilerBundle extends AbstractBundle
             ->set('git_profiler.git_binary', $config['git_binary'] ?? (new ExecutableFinder())->find('git') ?? 'git')
             ->set('git_profiler.timeout', $config['timeout'])
             ->set('git_profiler.graph_commit_limit', $config['graph_commit_limit']);
+
+        // The cache of the git outputs: a dedicated pool inside the kernel cache directory, so that `cache:clear`
+        // empties it. Containers without a cache directory (not a kernel) get no pool, hence no cache.
+        if ($builder->hasParameter('kernel.cache_dir')) {
+            $container->services()
+                ->set('git_profiler.cache', FilesystemAdapter::class)
+                ->args(['git_profiler', 0, '%kernel.cache_dir%/git_profiler']);
+        }
 
         $container->import('../config/services.php');
     }

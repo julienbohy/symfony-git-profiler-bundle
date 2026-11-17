@@ -27,6 +27,7 @@ use Symfony\Component\VarDumper\Cloner\Data;
 /**
  * @phpstan-type CollectedOperation array{kind: string, label: string, shortLabel: string, step: ?int, total: ?int, headName: ?string, onto: ?string, target: ?string, hints: list<string>}
  * @phpstan-type CollectedFile array{path: string, status: string, statusLabel: string, stage: string, stageLabel: string, oldPath: ?string, additions: int, deletions: int, conflict: ?string}
+ * @phpstan-type CollectedCommand array{command: string, durationMs: float, successful: bool, error: ?string, cached?: bool}
  * @phpstan-type CollectedData array{
  *     available?: bool,
  *     branch?: ?string,
@@ -46,7 +47,7 @@ use Symfony\Component\VarDumper\Cloner\Data;
  *     compareUrl?: ?string,
  *     describe?: ?string,
  *     stashCount?: int,
- *     commands?: list<array{command: string, durationMs: float, successful: bool, error: ?string}>,
+ *     commands?: list<CollectedCommand>,
  * }
  */
 final class GitDataCollector extends AbstractDataCollector implements LateDataCollectorInterface
@@ -320,16 +321,27 @@ final class GitDataCollector extends AbstractDataCollector implements LateDataCo
     }
 
     /**
-     * @return list<array{command: string, durationMs: float, successful: bool, error: ?string}>
+     * @return list<CollectedCommand> `cached` is absent from profiles collected before the cache existed
      */
     public function getCommands(): array
     {
         return $this->collected()['commands'] ?? [];
     }
 
+    /**
+     * Sum of the durations of the processes: the commands of a batch run in parallel, so this is not the wall time.
+     */
     public function getCommandsDuration(): float
     {
         return (float) array_sum(array_column($this->getCommands(), 'durationMs'));
+    }
+
+    /**
+     * Commands whose output came from the cache: no process was started for them.
+     */
+    public function getCachedCommandsCount(): int
+    {
+        return \count(array_filter($this->getCommands(), static fn (array $command): bool => $command['cached'] ?? false));
     }
 
     /**
@@ -429,7 +441,7 @@ final class GitDataCollector extends AbstractDataCollector implements LateDataCo
     }
 
     /**
-     * @return array{command: string, durationMs: float, successful: bool, error: ?string}
+     * @return CollectedCommand
      */
     private function flattenTrace(GitCommandTrace $trace): array
     {
@@ -438,6 +450,7 @@ final class GitDataCollector extends AbstractDataCollector implements LateDataCo
             'durationMs' => $trace->durationMs,
             'successful' => $trace->successful,
             'error' => $trace->error,
+            'cached' => $trace->cached,
         ];
     }
 

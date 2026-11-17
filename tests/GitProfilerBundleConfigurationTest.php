@@ -5,16 +5,20 @@ declare(strict_types=1);
 namespace JulienBohy\GitProfilerBundle\Tests;
 
 use JulienBohy\GitProfilerBundle\DataCollector\GitDataCollector;
+use JulienBohy\GitProfilerBundle\Git\Cache\GitOutputCache;
 use JulienBohy\GitProfilerBundle\Git\Command\ProcessGitCommandRunner;
 use JulienBohy\GitProfilerBundle\Git\Command\TraceableGitCommandRunner;
+use JulienBohy\GitProfilerBundle\Git\GitDirectory;
 use JulienBohy\GitProfilerBundle\Git\GitRepository;
 use JulienBohy\GitProfilerBundle\GitProfilerBundle;
 use JulienBohy\GitProfilerBundle\Graph\CommitGraphLayoutInterface;
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
+use Symfony\Component\Cache\Adapter\FilesystemAdapter;
 use Symfony\Component\Config\Definition\Exception\InvalidConfigurationException;
 use Symfony\Component\DependencyInjection\Compiler\MergeExtensionConfigurationPass;
 use Symfony\Component\DependencyInjection\ContainerBuilder;
+use Symfony\Component\DependencyInjection\ContainerInterface;
 use Symfony\Component\DependencyInjection\Reference;
 
 final class GitProfilerBundleConfigurationTest extends TestCase
@@ -124,12 +128,60 @@ final class GitProfilerBundleConfigurationTest extends TestCase
         self::assertSame(TraceableGitCommandRunner::class, (string) $arguments[2]);
     }
 
+    public function testTheOutputsAreCachedInADedicatedPoolInsideTheKernelCacheDirectory(): void
+    {
+        $container = self::load(parameters: ['kernel.cache_dir' => '/var/www/var/cache/dev']);
+
+        $pool = $container->getDefinition('git_profiler.cache');
+        self::assertSame(FilesystemAdapter::class, $pool->getClass());
+        self::assertSame(['git_profiler', 0, '%kernel.cache_dir%/git_profiler'], $pool->getArguments());
+        self::assertFalse($pool->isPublic());
+
+        $services = [GitOutputCache::class, GitDirectory::class, GitRepository::class];
+        $cacheArguments = $container->getDefinition(GitOutputCache::class)->getArguments();
+        self::assertInstanceOf(Reference::class, $cacheArguments[0]);
+        self::assertSame('git_profiler.cache', (string) $cacheArguments[0]);
+        self::assertSame(ContainerInterface::NULL_ON_INVALID_REFERENCE, $cacheArguments[0]->getInvalidBehavior());
+        foreach ($services as $service) {
+            self::assertTrue($container->hasDefinition($service));
+        }
+    }
+
+    public function testThereIsNoPoolWithoutAKernelCacheDirectory(): void
+    {
+        $container = self::load();
+
+        self::assertFalse($container->hasDefinition('git_profiler.cache'));
+        $pool = $container->getDefinition(GitOutputCache::class)->getArgument(0);
+        self::assertInstanceOf(Reference::class, $pool);
+        self::assertSame(ContainerInterface::NULL_ON_INVALID_REFERENCE, $pool->getInvalidBehavior());
+    }
+
+    public function testTheServicesThatNeedTheCacheShareTheSameOne(): void
+    {
+        $container = self::load();
+
+        $directory = $container->getDefinition(GitDirectory::class)->getArguments();
+        $repository = $container->getDefinition(GitRepository::class)->getArguments();
+
+        self::assertInstanceOf(Reference::class, $directory[2]);
+        self::assertSame(GitOutputCache::class, (string) $directory[2]);
+        self::assertInstanceOf(Reference::class, $repository[12]);
+        self::assertSame(GitOutputCache::class, (string) $repository[12]);
+        self::assertInstanceOf(Reference::class, $repository[11]);
+        self::assertSame(GitDirectory::class, (string) $repository[11]);
+    }
+
     /**
-     * @param array<string, mixed> $config
+     * @param array<string, mixed>  $config
+     * @param array<string, string> $parameters extra kernel parameters
      */
-    public static function load(array $config = []): ContainerBuilder
+    public static function load(array $config = [], array $parameters = []): ContainerBuilder
     {
         $container = new ContainerBuilder();
+        foreach ($parameters as $name => $value) {
+            $container->setParameter($name, $value);
+        }
         $container->setParameter('kernel.project_dir', \dirname(__DIR__));
         $container->setParameter('kernel.environment', 'test');
         $container->setParameter('kernel.build_dir', sys_get_temp_dir());

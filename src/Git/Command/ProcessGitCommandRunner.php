@@ -6,6 +6,7 @@ namespace JulienBohy\GitProfilerBundle\Git\Command;
 
 use JulienBohy\GitProfilerBundle\Exception\GitCommandFailedException;
 use Symfony\Component\Process\Exception\ExceptionInterface as ProcessExceptionInterface;
+use Symfony\Component\Process\Exception\ProcessTimedOutException;
 use Symfony\Component\Process\Process;
 
 /**
@@ -13,7 +14,7 @@ use Symfony\Component\Process\Process;
  *
  * @internal
  */
-final readonly class ProcessGitCommandRunner implements GitCommandRunnerInterface
+final readonly class ProcessGitCommandRunner implements ParallelGitCommandRunnerInterface
 {
     /**
      * Stable, parseable output; never take optional locks (the profiler must not
@@ -69,12 +70,70 @@ final readonly class ProcessGitCommandRunner implements GitCommandRunnerInterfac
         }
 
         if (!$process->isSuccessful()) {
-            $stderr = trim($process->getErrorOutput());
-
-            throw GitCommandFailedException::fromArguments($args, $stderr !== '' ? $stderr : \sprintf('exit code %d', (int) $process->getExitCode()));
+            throw $this->failure($args, $process);
         }
 
         return $process->getOutput();
+    }
+
+    public function runParallel(array $commands): array
+    {
+        /** @var array<int, Process> $running */
+        $running = [];
+        /** @var array<int, int|float> $startedAt */
+        $startedAt = [];
+        /** @var array<int, GitCommandResult> $results */
+        $results = [];
+
+        foreach ($commands as $index => $args) {
+            $process = $this->createProcess($args);
+
+            try {
+                $process->start();
+            } catch (ProcessExceptionInterface $e) {
+                $results[$index] = GitCommandResult::failure(GitCommandFailedException::fromArguments($args, $e->getMessage(), $e), 0.0);
+
+                continue;
+            }
+
+            $running[$index] = $process;
+            $startedAt[$index] = hrtime(true);
+        }
+
+        // Polled rather than waited one after the other: isRunning() drains the pipes of each process, so a
+        // command with a large output never stalls on a full pipe, and each duration is its own.
+        while ($running !== []) {
+            foreach ($running as $index => $process) {
+                $args = $commands[$index];
+
+                try {
+                    if ($process->isRunning()) {
+                        $process->checkTimeout();
+
+                        continue;
+                    }
+                } catch (ProcessTimedOutException $e) {
+                    $results[$index] = GitCommandResult::failure(GitCommandFailedException::fromArguments($args, $e->getMessage(), $e), $this->elapsedMs($startedAt[$index]));
+                    unset($running[$index]);
+
+                    continue;
+                }
+
+                $duration = $this->elapsedMs($startedAt[$index]);
+                $results[$index] = $process->isSuccessful()
+                    ? GitCommandResult::success($process->getOutput(), $duration)
+                    : GitCommandResult::failure($this->failure($args, $process), $duration);
+                unset($running[$index]);
+            }
+
+            if ($running !== []) {
+                usleep(500);
+            }
+        }
+
+        ksort($results);
+
+        return array_values($results);
     }
 
     /**
@@ -85,5 +144,20 @@ final readonly class ProcessGitCommandRunner implements GitCommandRunnerInterfac
     public function createProcess(array $args): Process
     {
         return new Process([$this->gitBinary, ...self::CONFIG_OVERRIDES, ...$args], $this->workingDirectory, self::ENVIRONMENT, null, $this->timeout);
+    }
+
+    /**
+     * @param list<string> $args
+     */
+    private function failure(array $args, Process $process): GitCommandFailedException
+    {
+        $stderr = trim($process->getErrorOutput());
+
+        return GitCommandFailedException::fromArguments($args, $stderr !== '' ? $stderr : \sprintf('exit code %d', (int) $process->getExitCode()));
+    }
+
+    private function elapsedMs(int|float $start): float
+    {
+        return (hrtime(true) - $start) / 1_000_000;
     }
 }

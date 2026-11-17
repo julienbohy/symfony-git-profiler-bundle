@@ -86,6 +86,45 @@ final class GitDataCollectorTest extends TestCase
         self::assertSame([], $tracer->getTraces());
     }
 
+    public function testExposesWhichCommandsCameFromTheCache(): void
+    {
+        $inner = new class implements GitCommandRunnerInterface {
+            public function run(array $args): string
+            {
+                return '';
+            }
+        };
+        $tracer = new TraceableGitCommandRunner($inner);
+        $repository = $this->createStub(GitRepositoryInterface::class);
+        $repository->method('read')->willReturnCallback(static function () use ($tracer): ?GitInfo {
+            $tracer->run(['status', '-z']);
+            $tracer->recordCached(['config', '--null', '--list']);
+
+            return null;
+        });
+
+        $collector = new GitDataCollector($repository, tracer: $tracer);
+        $collector->lateCollect();
+
+        $commands = $collector->getCommands();
+        self::assertCount(2, $commands);
+        self::assertFalse($commands[0]['cached'] ?? null);
+        self::assertTrue($commands[1]['cached'] ?? null);
+        self::assertSame('git config --null --list', $commands[1]['command']);
+        self::assertSame(0.0, $commands[1]['durationMs']);
+        self::assertSame(1, $collector->getCachedCommandsCount());
+    }
+
+    public function testNoCachedCommandsInAProfileWithoutTheCachedFlag(): void
+    {
+        $collector = new GitDataCollector($this->createStub(GitRepositoryInterface::class));
+        (new \ReflectionProperty(GitDataCollector::class, 'data'))->setValue($collector, [
+            'commands' => [['command' => 'git status', 'durationMs' => 1.0, 'successful' => true, 'error' => null]],
+        ]);
+
+        self::assertSame(0, $collector->getCachedCommandsCount());
+    }
+
     public function testEachCollectorSharingATracerExposesOnlyItsOwnCommands(): void
     {
         $inner = new class implements GitCommandRunnerInterface {

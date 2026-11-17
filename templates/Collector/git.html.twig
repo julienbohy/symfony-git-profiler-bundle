@@ -371,7 +371,7 @@
             <p>No git command was run.</p>
         </div>
     {% else %}
-        <p class="text-muted">{{ collector.commands|length }} command{{ collector.commands|length > 1 ? 's' }} in {{ collector.commandsDuration|number_format(1) }} ms.</p>
+        <p class="text-muted">{{ collector.commands|length }} command{{ collector.commands|length > 1 ? 's' }}{% if collector.cachedCommandsCount > 0 %} ({{ collector.cachedCommandsCount }} cached){% endif %} in {{ collector.commandsDuration|number_format(1) }} ms of process time (the commands of a batch run in parallel).</p>
         <table>
             <thead>
                 <tr>
@@ -384,9 +384,12 @@
                 {% for command in collector.commands %}
                     <tr>
                         <td><code>{{ command.command }}</code></td>
-                        <td>{{ command.durationMs|number_format(1) }}&nbsp;ms</td>
+                        {% set cached = command.cached|default(false) %}
+                        <td>{% if cached %}&mdash;{% else %}{{ command.durationMs|number_format(1) }}&nbsp;ms{% endif %}</td>
                         <td>
-                            {% if command.successful %}
+                            {% if cached %}
+                                <span class="text-muted">cached</span>
+                            {% elseif command.successful %}
                                 OK
                             {% else %}
                                 <span class="status-error">Failed</span>

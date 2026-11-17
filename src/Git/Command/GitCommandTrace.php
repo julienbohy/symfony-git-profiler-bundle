@@ -5,7 +5,7 @@ declare(strict_types=1);
 namespace JulienBohy\GitProfilerBundle\Git\Command;
 
 /**
- * One git command executed during the request.
+ * One git command of the request: executed, or served from the cache (no process was started).
  *
  * @internal
  */
@@ -19,6 +19,7 @@ final readonly class GitCommandTrace
         public float $durationMs,
         public bool $successful,
         public ?string $error,
+        public bool $cached = false,
     ) {
     }
 

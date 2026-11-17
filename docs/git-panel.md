@@ -170,7 +170,7 @@ the one case where a link can still 404. The compare link starts from `HEAD`, wh
 upstream when you are not ahead, hence exists on the remote. When you are ahead, the commits it would
 start from may not exist remotely, so there is no compare link.
 
-**How the remote is found.** One extra command, `git config --null --list`, read once per request:
+**How the remote is found.** One extra command, `git config --null --list` ([cached](#how-it-works-and-performance) until a git config file changes):
 
 1. The remote is the `branch.<name>.remote` of the current branch (not split from `origin/main`, so remote
    names containing slashes work). Without one (no upstream, detached HEAD) it is `origin`, if it exists.
@@ -265,8 +265,8 @@ diff commands are not run at all.
 **How an operation is detected.** The bundle runs one extra command, `git rev-parse --git-dir`, to find
 the git directory (`--absolute-git-dir` needs git 2.13; a relative result is resolved against the
 project directory). It works for a normal repository, a linked worktree (`.git/worktrees/<name>`) and a
-submodule. The path is then kept for the lifetime of the PHP process, and the files below are read
-directly. The first match wins, in this order:
+submodule. The path is then kept for the lifetime of the PHP process (and in the
+[cache](#how-it-works-and-performance) across requests), and the files below are read directly. The first match wins, in this order:
 
 | Operation | Detected from |
 |---|---|
@@ -326,34 +326,42 @@ The last section lists every git command run **for this request**, with its dura
 
 *Commands of the diverged case (see the bottom of the screenshot): status, show, log, diff, graph log.*
 
-| Command | Purpose | Runs when |
-|---|---|---|
-| `git status --porcelain=v2 --branch -z --untracked-files=all` | Branch, upstream, ahead/behind, staged/unstaged/untracked | Always |
-| `git show -s --format=%h HEAD @{u} --` | Short hashes of `HEAD` and the upstream | Always (`@{u}` only with an upstream) |
-| `git rev-parse --git-dir` | Location of the git directory, to detect an operation in progress and to count the stashes | Always, once per PHP process (so once per request under PHP-FPM) |
-| `git diff --cached --raw --numstat -z -M` | Staged files | Something is staged |
-| `git diff --raw --numstat -z -M` | Unstaged files | Something is unstaged |
-| `git log … @{u}..HEAD --` | Unpushed commits | Upstream and ahead > 0 |
-| `git diff --raw --numstat -z -M @{u}...HEAD --` | Files of the unpushed commits | Same |
-| `git log … --topo-order -n <limit> HEAD @{u} --` | Commit graph | Always |
-| `git config --null --list` | Remote of the branch and its URL, for the [links](#links-to-the-remote) | Always |
-| `git describe --tags --abbrev=7 HEAD` | [Version](#version-and-stashes) | The repository has a tag (checked on the filesystem, see below) |
+| Command | Purpose | Runs when | Live or cached |
+|---|---|---|---|
+| `git status --porcelain=v2 --branch -z --untracked-files=all` | Branch, upstream, ahead/behind, staged/unstaged/untracked | Always, alone and first | Always live |
+| `git show -s --format="%H %h" HEAD @{u} --` | Full and short hashes of `HEAD` and the upstream | Always (`@{u}` only with an upstream) | Always live: it tells the cache which commits `HEAD` and the upstream are at |
+| `git rev-parse --git-dir` | Location of the git directory, to detect an operation in progress, to count the stashes and to find the tags | Always | Cached (and kept for the lifetime of the PHP process) |
+| `git diff --cached --raw --numstat -z -M` | Staged files | Something is staged | Always live |
+| `git diff --raw --numstat -z -M` | Unstaged files | Something is unstaged | Always live |
+| `git log … @{u}..HEAD --` | Unpushed commits | Upstream and ahead > 0 | Cached |
+| `git diff --raw --numstat -z -M @{u}...HEAD --` | Files of the unpushed commits | Same | Cached |
+| `git log … --topo-order -n <limit> HEAD @{u} --` | Commit graph | Always | Cached |
+| `git config --null --list` | Remote of the branch and its URL, for the [links](#links-to-the-remote) | Always | Cached |
+| `git describe --tags --abbrev=7 HEAD` | [Version](#version-and-stashes) | The repository has a tag (checked on the filesystem, see below) | Cached |
 
 Stashes are counted by reading a file, not by a command.
 
-That is **5 to 10** commands: 5 on a repository without tags, 6 with tags, up to 10 with staged, unstaged and unpushed work. Every call is also prefixed with `-c log.showSignature=false -c
+That is **5 to 10** commands: 5 on a repository without tags, 6 with tags, up to 10 with staged, unstaged and unpushed work. The
+commands that are [cached](#how-it-works-and-performance) are still listed, so that these counts stay the same
+from one request to the next, but they ran no process: their row says **cached** instead of a duration. Every call that
+does run is also prefixed with `-c log.showSignature=false -c
 diff.relative=false` (to neutralise user config that would alter the output); those options are not
 shown in the table.
 
 How to read it:
 
-- **Duration** is wall-clock time of the process, typically 10 to 20 ms each on a small repository.
+- **Duration** is the wall-clock time of that process alone, typically 10 to 20 ms on a small repository.
+  Everything after `status` starts together, so the durations of a batch overlap: the total shown above the
+  table (a sum, "of process time") is more than the time the collection took.
   Large repositories, network file systems, antivirus scanning, Docker bind mounts on macOS, or huge
   untracked trees make `git status` the first to grow.
+- **Cached** (no duration, shown as a dash): the output of that command was read from the
+  [cache](#how-it-works-and-performance), no process ran.
 - **Failed** is shown in red with the error: git's stderr, or `exit code N`.
 - **A timeout** appears as Failed with the Symfony Process message ("exceeded the timeout of 5
   seconds"). If it hits `git status` or `git show`, the whole panel falls back to the "not a Git
-  repository" state; if it hits a later command, only that section is empty. Raise `timeout` or fix
+  repository" state; if it hits any other command, only that section is empty (the commands run in
+  parallel, so one hanging command does not delay or affect the others). Raise `timeout` or fix
   the underlying slowness.
 - "No git command was run" means no command was recorded for this profile (for instance a profile stored before the bundle was enabled).
 
@@ -409,17 +417,74 @@ Safeguards on every git process:
 - Read-only commands only. No `fetch`, `pull`, `remote update` or `ls-remote`: **no network access**.
 - Linked worktrees and submodules (where `.git` is a file) are supported.
 
-**Cost.** 5 to 10 short-lived processes per profiled request, about 10 to 20 ms each on a normal
-repository; in the screenshots, 63 to 88 ms in total. Because this happens after the response, it adds
-no latency to the page itself. It does keep the PHP worker busy a little longer: with PHP-FPM
+**Parallel commands.** (When the runner has no parallel capability, which only happens with a custom runner, the same
+commands run one after the other.) `git status` runs first, alone, because the rest depends on it. Then everything else
+starts together (`symfony/process`, each process with its own `timeout`): the HEAD and upstream lookup
+(`git show`), the diffs, the git directory lookup, and, when they are not cached, the graph, the unpushed
+commits, the remote config and the version. One command that fails or times out does not affect the others; its
+section alone is empty. Some commands need the answer of the first batch to know their
+cache key (see below: the common git directory, the oid of the upstream): the ones that are not cached
+form a second batch.
+
+**Cross-request cache.** What `git status` and `git show` cannot tell, the history, rarely changes between two page
+loads, so the output of the commands that only depend on it is kept from one request to the next, in a dedicated
+cache pool in `var/cache/<env>/git_profiler` (`FilesystemAdapter`, from `symfony/cache`). `cache:clear` empties it,
+and so does deleting that directory at any time: it is only an optimisation, and there is nothing to configure. If
+the kernel has no cache directory or the pool cannot be written, the commands simply run every time.
+
+- **Never cached:** `git status`, `git show` and the staged and unstaged diffs, which are the live state of the
+  working tree, of `HEAD` and of the upstream. `git show` prints the full object ids of `HEAD` and of the upstream:
+  they are the heart of the keys below.
+- **Graph, unpushed commits and files:** keyed by the full oid of `HEAD`, the full oid of the upstream (so a
+  force-pushed upstream is a miss even when the ahead and behind counts stay the same), the exact command (hence
+  `graph_commit_limit`) and the `shallow` file of the repository.
+- **Version (`git describe`):** keyed by the oid of `HEAD`, the path, mtime, size and inode of every loose file under
+  `refs/tags` (nested tags included: a tag created in a sub directory does not change the mtime of `refs/tags`),
+  and the state of `packed-refs`. Not cached at all with the reftable ref backend (the tables are not tracked).
+- **Remote config (`git config --list`):** keyed by the mtime, size and inode of the repository `config`, of
+  `config.worktree`, of `/etc/gitconfig`, `~/.gitconfig` and the XDG `git/config` (a remote can be defined there
+  too). A system file elsewhere (it depends on how git was built) and files pulled in with `include.path` are not
+  tracked: edit a tracked file or run `cache:clear`.
+- **Git directory (`git rev-parse --git-dir`):** keyed by the project directory and the nearest `.git` above it: for a
+  `.git` file (worktree, submodule), its mtime, size and inode; for a `.git` directory, its inode and that it still
+  has `HEAD`, `objects` and `refs` (not its mtime, which changes with every lock file git creates in it).
+
+The cache stores the output of the commands (the config reduced as described below), parsed the same way whether it was cached or not.
+It contains what the panel shows (commit subjects, author names, branch names), in a directory that is as readable as
+the rest of `var/cache`: another reason to keep the bundle in `dev` and `test`. Of `git config --list`, only the
+`branch.*.remote` and `remote.*.url` entries are kept, with the credentials (`user:password@`, tokens) removed from
+the URLs: your name, email, `http.*` settings and anything else in your git configuration never reach the disk, and
+the links are the same as without the cache.
+A commit made between `git status` and `git show` is not cached. The history commands read `HEAD` and the
+upstream by name, so a commit or a fetch landing in the few milliseconds after `git show` can still be stored
+under the previous oids; it would only be served again if `HEAD` and the upstream went back to exactly those
+oids (after a `git reset`, say), and `cache:clear` fixes it.
+
+**Cost.** Measured on a Symfony 7.4 application whose repository has an upstream, a tag and a GitHub remote (6 commits,
+git 2.54, macOS), request `/` with the bundle at 0.5.1, then with parallel commands and cache. "Wall time" is the time of the whole collection, "process time" the sum of the durations shown in the panel;
+means of several requests per row (the cold row is a single request):
+
+| | Processes run | Cached | Process time | Wall time |
+|---|---|---|---|---|
+| 0.5.1 (sequential, no cache) | 6 | 0 | 72 ms | 73 ms |
+| Cold (first request after `cache:clear`, or after `HEAD` or the upstream moved) | 6 | 0 | 80 ms | 46 ms |
+| Warm | 2 (`status`, `show`) | 4 | 26 ms | 24 ms |
+
+On this small repository, `git status` and `git show` are about 12 to 15 ms each; the cold request pays three
+rounds (`status`, then the first batch, then the second one), the warm request two. On a larger repository the
+parallel part and the cached part grow, while the two live commands are the floor. Because all of it happens after
+the response, it adds no latency to the page itself. It does keep the PHP worker busy a little longer: with PHP-FPM
 (`fastcgi_finish_request`) the client is already released; with servers that do not flush before
 `kernel.terminate`, the response may be held until collection ends.
 
-**Worst case.** Each command is bounded by `timeout`, so the upper bound is `10 x timeout`, i.e. 50 s
-with the default, if every command hangs (for example a stalled network file system). A hanging
-`status` or `show` aborts the collection immediately (the panel becomes "unavailable"), so in practice
-the bound is much lower. Lower `timeout` on slow mounts if you prefer to lose the panel over holding a
-worker.
+**Worst case.** Each command is bounded by `timeout`, and the commands run in at most three sequential rounds
+(`status`, the first batch, the second batch): the upper bound is `3 x timeout`, i.e. 15 s with the default, if every
+command hangs (for example a stalled network file system), down to `2 x timeout` (10 s) once the history is cached
+(no second batch) instead of `10 x timeout` before. (One exception to these bounds: if only `git rev-parse --git-dir`
+hangs, the readers of the git directory, which look for an operation in progress, the stashes and the tags, retry
+it one after the other, as they always did.) A hanging `status` or `show` aborts the collection immediately (the
+panel becomes "unavailable"): `1 x timeout` for `status`, `2 x timeout` for `show`. Lower `timeout` on slow mounts if you prefer to lose the panel
+over holding a worker.
 
 **Scope.** Intended for `dev` and `test`. It exposes branch names, commit subjects, author names and
 file paths in the profiler, and spawns processes: do not enable it in `prod`.

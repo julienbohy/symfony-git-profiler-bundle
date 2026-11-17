@@ -27,7 +27,7 @@ Symfony bundle that exposes the Git state of the current repository — **branch
   (added, modified, deleted, renamed…).
 - **Commits ahead of the upstream** (unpushed) with hash, message, author, date and the files they touch.
 - **Zero configuration** — active as soon as the Web Profiler is, in `dev`/`test` only.
-- **Lightweight and safe** — 5 to 10 git commands per request, run after the response is sent; the profiler never takes git's index lock (git 2.15+), and degrades cleanly when the directory is not a Git repository or git is unavailable.
+- **Lightweight and safe** — 5 to 10 git commands per request, run after the response is sent, in parallel after `git status`, the history ones cached across requests; the profiler never takes git's index lock (git 2.15+), and degrades cleanly when the directory is not a Git repository or git is unavailable.
 
 ## Screenshots
 

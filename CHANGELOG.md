@@ -7,6 +7,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- The git commands run in parallel: `git status` first, then everything else starts together (HEAD and
+  upstream lookup, diffs, graph, unpushed commits, remote config, version), each with its own timeout and
+  duration. A failing or hanging command no longer delays or affects the others. The worst case, with every
+  command hanging, drops from `10 x timeout` to `3 x timeout` (`2 x timeout` once the history is cached).
+- Parallel execution is an optional capability (`ParallelGitCommandRunnerInterface`, implemented by the bundle's
+  runner): `GitCommandRunnerInterface` is unchanged, and a custom runner that only implements `run()` still works,
+  its commands running one after the other.
+- `git show` now also prints the full object ids of `HEAD` and of the upstream (`--format="%H %h"`).
+- The total of the "Git commands" section is the sum of the durations of the processes, not the time the
+  collection took, as the commands of a batch overlap.
+- Requires `symfony/cache` (already part of every Symfony application).
+
+### Added
+
+- A cross-request cache for the output of the commands that only depend on the history (commit graph, unpushed
+  commits and files, version, remote config, git directory), in `var/cache/<env>/git_profiler`, emptied by
+  `cache:clear`. `git status`, `git show` and the diffs are never cached. A cached command is still listed in
+  the "Git commands" section, with the status "cached" and no duration. Keys include the full oids of `HEAD`
+  and of the upstream, the state of the tags and of the git configuration files, so a force-pushed upstream, a
+  new tag or a changed remote are never served stale. Of the git configuration, only the `branch.*.remote` and
+  `remote.*.url` entries are cached, with the credentials (`user:password@`) removed from the URLs: the rest
+  (name, email, `http.*` settings...) is never written to disk.
+
 ## [0.5.1] - 2026-11-06
 
 ### Fixed

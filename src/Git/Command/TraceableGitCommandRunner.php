@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace JulienBohy\GitProfilerBundle\Git\Command;
 
+use JulienBohy\GitProfilerBundle\Exception\GitCommandFailedException;
 use Symfony\Contracts\Service\ResetInterface;
 
 /**
@@ -12,7 +13,7 @@ use Symfony\Contracts\Service\ResetInterface;
  *
  * @internal
  */
-final class TraceableGitCommandRunner implements GitCommandRunnerInterface, ResetInterface
+final class TraceableGitCommandRunner implements ParallelGitCommandRunnerInterface, ResetInterface
 {
     /**
      * @var list<GitCommandTrace>
@@ -38,6 +39,59 @@ final class TraceableGitCommandRunner implements GitCommandRunnerInterface, Rese
         $this->traces[] = new GitCommandTrace($args, $this->elapsedMs($start), true, null);
 
         return $output;
+    }
+
+    /**
+     * Each command keeps its own duration (not the wall time of the batch), traced in the order they were submitted.
+     */
+    public function runParallel(array $commands): array
+    {
+        if (!$this->inner instanceof ParallelGitCommandRunnerInterface) {
+            return $this->runSequentially($commands);
+        }
+
+        $results = $this->inner->runParallel($commands);
+
+        foreach ($results as $index => $result) {
+            $this->traces[] = new GitCommandTrace($commands[$index], $result->durationMs, $result->isSuccessful(), $result->failure?->getMessage());
+        }
+
+        return $results;
+    }
+
+    /**
+     * The inner runner cannot run commands at once: one after the other, traced by run() as usual.
+     *
+     * @param list<list<string>> $commands
+     *
+     * @return list<GitCommandResult>
+     */
+    private function runSequentially(array $commands): array
+    {
+        $results = [];
+
+        foreach ($commands as $args) {
+            $start = hrtime(true);
+
+            try {
+                $results[] = GitCommandResult::success($this->run($args), $this->elapsedMs($start));
+            } catch (GitCommandFailedException $e) {
+                $results[] = GitCommandResult::failure($e, $this->elapsedMs($start));
+            }
+        }
+
+        return $results;
+    }
+
+    /**
+     * A command whose output came from the cache: shown in the panel, without duration, so the number of
+     * commands of a request stays explainable.
+     *
+     * @param list<string> $args
+     */
+    public function recordCached(array $args): void
+    {
+        $this->traces[] = new GitCommandTrace($args, 0.0, true, null, true);
     }
 
     /**

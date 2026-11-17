@@ -19,6 +19,11 @@ final class ProcessGitCommandRunnerTest extends TestCase
 
     private string $dir;
 
+    /**
+     * @var list<string>
+     */
+    private array $fakeBinaryDirectories = [];
+
     protected function setUp(): void
     {
         $this->dir = $this->createTemporaryDirectory('gpb_runner_');
@@ -28,6 +33,7 @@ final class ProcessGitCommandRunnerTest extends TestCase
     protected function tearDown(): void
     {
         $this->removeDirectory($this->dir);
+        array_map($this->removeDirectory(...), $this->fakeBinaryDirectories);
     }
 
     public function testReturnsTheRawStandardOutput(): void
@@ -126,5 +132,137 @@ final class ProcessGitCommandRunnerTest extends TestCase
 
         $expected = ["'/usr/bin/git'", "'-c'", "'log.showSignature=false'", "'-c'", "'diff.relative=false'", "'show'", "'-s'"];
         self::assertSame(implode(' ', $expected), $commandLine);
+    }
+
+    public function testRunsAllTheCommandsOfABatchAtTheSameTime(): void
+    {
+        // Each fake "git" announces itself, then waits for its two siblings to announce themselves: it only
+        // succeeds when the three processes were started before any of them was waited for.
+        $barrier = $this->createTemporaryDirectory('gpb_barrier_');
+        $binary = $this->fakeGit(<<<SH
+            touch "$barrier/\$\$"
+            for i in \$(seq 1 500); do
+                [ "\$(ls "$barrier" | wc -l)" -ge 3 ] && echo "together \$1" && exit 0
+                sleep 0.01
+            done
+            echo "alone" >&2
+            exit 3
+            SH);
+
+        $results = (new ProcessGitCommandRunner($this->dir, $binary))->runParallel([['status'], ['log'], ['diff']]);
+
+        self::assertCount(3, $results);
+        foreach ($results as $result) {
+            self::assertTrue($result->isSuccessful(), (string) $result->failure?->getMessage());
+            self::assertStringStartsWith('together', $result->output());
+        }
+        $this->removeDirectory($barrier);
+    }
+
+    public function testResultsFollowTheOrderOfTheCommandsWhateverTheOrderOfCompletion(): void
+    {
+        // The first command is the slowest one.
+        $binary = $this->fakeGit(<<<'SH'
+            case "$*" in *slow*) sleep 0.3 ;; esac
+            echo "$@"
+            SH);
+
+        $results = (new ProcessGitCommandRunner($this->dir, $binary))->runParallel([['slow'], ['fast'], ['quick']]);
+
+        self::assertCount(3, $results);
+        self::assertStringEndsWith("slow\n", $results[0]->output());
+        self::assertStringEndsWith("fast\n", $results[1]->output());
+        self::assertStringEndsWith("quick\n", $results[2]->output());
+        // Each result has its own duration, not the wall time of the batch.
+        self::assertGreaterThan($results[1]->durationMs, $results[0]->durationMs);
+        self::assertGreaterThanOrEqual(250.0, $results[0]->durationMs);
+    }
+
+    public function testAFailingCommandOfABatchDoesNotAffectTheOthers(): void
+    {
+        $results = (new ProcessGitCommandRunner($this->dir))->runParallel([
+            ['rev-parse', '--is-inside-work-tree'],
+            ['no-such-subcommand'],
+            ['rev-parse', '--git-dir'],
+        ]);
+
+        self::assertCount(3, $results);
+        self::assertSame("true\n", $results[0]->output());
+        self::assertFalse($results[1]->isSuccessful());
+        self::assertInstanceOf(GitCommandFailedException::class, $results[1]->failure);
+        self::assertStringContainsString('is not a git command', $results[1]->failure->getMessage());
+        self::assertSame(".git\n", $results[2]->output());
+        self::assertFalse($results[0]->cached);
+    }
+
+    public function testEachCommandOfABatchHasItsOwnTimeout(): void
+    {
+        $binary = $this->fakeGit(<<<'SH'
+            case "$*" in *hang*) sleep 10 ;; esac
+            echo done
+            SH);
+
+        $results = (new ProcessGitCommandRunner($this->dir, $binary, 0.5))->runParallel([['ok'], ['hang'], ['ok']]);
+
+        self::assertCount(3, $results);
+        self::assertSame("done\n", $results[0]->output());
+        self::assertFalse($results[1]->isSuccessful());
+        self::assertStringContainsString('exceeded the timeout of 0.5 seconds', (string) $results[1]->failure?->getMessage());
+        self::assertSame("done\n", $results[2]->output());
+    }
+
+    public function testABatchReadsLargeOutputsWithoutStalling(): void
+    {
+        // Larger than a pipe buffer: the output of a command is drained while the others are still running.
+        $binary = $this->fakeGit(<<<'SH'
+            head -c 400000 /dev/zero | tr '\0' 'x'
+            SH);
+
+        $results = (new ProcessGitCommandRunner($this->dir, $binary))->runParallel([['a'], ['b']]);
+
+        self::assertSame(400000, \strlen($results[0]->output()));
+        self::assertSame(400000, \strlen($results[1]->output()));
+    }
+
+    public function testAnEmptyBatchRunsNothing(): void
+    {
+        self::assertSame([], (new ProcessGitCommandRunner($this->dir))->runParallel([]));
+    }
+
+    public function testACommandThatCannotStartIsAFailureOfItsOwn(): void
+    {
+        $results = (new ProcessGitCommandRunner($this->dir . '/missing'))->runParallel([['status'], ['log']]);
+
+        self::assertCount(2, $results);
+        self::assertFalse($results[0]->isSuccessful());
+        self::assertFalse($results[1]->isSuccessful());
+    }
+
+    public function testAFailedResultThrowsItsFailureWhenReadAndASuccessfulOneNeverDoes(): void
+    {
+        $results = (new ProcessGitCommandRunner($this->dir))->runParallel([['no-such-subcommand'], ['rev-parse', '--git-dir']]);
+
+        try {
+            $results[0]->output();
+            self::fail('An exception was expected.');
+        } catch (GitCommandFailedException $e) {
+            self::assertSame($results[0]->failure, $e);
+        }
+        self::assertSame(".git\n", $results[1]->output());
+    }
+
+    /**
+     * An executable stand-in for the git binary: it is given "-c <setting> -c <setting>" first, then the arguments.
+     */
+    private function fakeGit(string $body): string
+    {
+        $directory = $this->createTemporaryDirectory('gpb_fakegit_');
+        $this->fakeBinaryDirectories[] = $directory;
+        $file = $directory . '/git';
+        // Drops the four "-c" arguments added by the runner, so $@ holds the git arguments only.
+        file_put_contents($file, "#!/bin/sh\nshift 4\n" . $body . "\n");
+        chmod($file, 0o755);
+
+        return $file;
     }
 }
